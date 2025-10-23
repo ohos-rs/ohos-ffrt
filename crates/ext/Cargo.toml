@@ -1,0 +1,8 @@
+[package]
+name = "ohos-ext"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ohos-ext-macro = { workspace = true }
+napi-ohos = { workspace = true, features = ["compact"]}

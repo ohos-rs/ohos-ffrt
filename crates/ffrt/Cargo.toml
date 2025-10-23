@@ -1,0 +1,7 @@
+[package]
+name = "ohos-ffrt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ohos-ffrt-sys = {workspace = true}
