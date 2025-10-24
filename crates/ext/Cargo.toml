@@ -5,4 +5,6 @@ edition = "2024"
 
 [dependencies]
 ohos-ext-macro = { workspace = true }
-napi-ohos = { workspace = true, features = ["compact"]}
+napi-ohos = { workspace = true, features = ["compat-mode"] }
+futures = { workspace = true }
+once_cell = { workspace = true }

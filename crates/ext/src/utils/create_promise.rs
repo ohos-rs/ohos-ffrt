@@ -4,6 +4,7 @@ use napi_ohos::Env;
 use napi_ohos::JsFunction;
 use napi_ohos::JsObject;
 use napi_ohos::NapiValue;
+use napi_ohos::bindgen_prelude::JsObjectValue;
 
 use crate::JsRc;
 
@@ -11,12 +12,12 @@ const SYM_PROMISE: &str = "Promise";
 const SYM_PROMISE_EXECUTOR: &str = "napi_ohos::promise::executor";
 
 pub type PromiseExecutor<Res> =
-  Box<dyn FnOnce(Env, Box<dyn Fn(Res)>, Box<dyn Fn(napi::Error)>) -> napi::Result<()>>;
+  Box<dyn FnOnce(Env, Box<dyn Fn(Res)>, Box<dyn Fn(napi_ohos::Error)>) -> napi_ohos::Result<()>>;
 
 pub fn create_promise<Res>(
   env: &Env,
   executor: PromiseExecutor<Res>,
-) -> napi::Result<JsObject>
+) -> napi_ohos::Result<JsObject>
 where
   Res: NapiValue + 'static,
 {

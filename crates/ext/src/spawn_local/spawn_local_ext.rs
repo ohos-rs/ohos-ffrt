@@ -1,7 +1,7 @@
 use futures::Future;
-use napi::Env;
-use napi::JsObject;
-use napi::NapiValue;
+use napi_ohos::Env;
+use napi_ohos::JsObject;
+use napi_ohos::NapiValue;
 
 use crate::spawn_local;
 use crate::spawn_local_promise;
@@ -81,9 +81,9 @@ pub trait SpawnLocalExt {
   fn spawn_local<Fut>(
     &self,
     future: Fut,
-  ) -> napi::Result<()>
+  ) -> napi_ohos::Result<()>
   where
-    Fut: Future<Output = napi::Result<()>> + 'static;
+    Fut: Future<Output = napi_ohos::Result<()>> + 'static;
 
   /// Spawns a non-blocking future on the local thread. Returns a Promise with the value
   /// returned in the async closure. Normal [`NapiValue`] types can be interacted with in
@@ -115,7 +115,7 @@ pub trait SpawnLocalExt {
   /// use async_std::task;
   ///
   /// #[napi]
-  /// fn my_js_func(env: Env) -> napi::Result<JsObject> {
+  /// fn my_js_func(env: Env) -> napi_ohos::Result<JsObject> {
   ///   env.spawn_local_promise(move |env| async move {
   ///     task::sleep(Duration::from_millis(1000)).await;
   ///     env.create_string("Hello World")
@@ -125,19 +125,19 @@ pub trait SpawnLocalExt {
   fn spawn_local_promise<R, Fut>(
     &self,
     future: Fut,
-  ) -> napi::Result<JsObject>
+  ) -> napi_ohos::Result<JsObject>
   where
     R: NapiValue + 'static,
-    Fut: Future<Output = napi::Result<R>> + 'static;
+    Fut: Future<Output = napi_ohos::Result<R>> + 'static;
 }
 
 impl SpawnLocalExt for Env {
   fn spawn_local<Fut>(
     &self,
     future: Fut,
-  ) -> napi::Result<()>
+  ) -> napi_ohos::Result<()>
   where
-    Fut: Future<Output = napi::Result<()>> + 'static,
+    Fut: Future<Output = napi_ohos::Result<()>> + 'static,
   {
     spawn_local(self, future)
   }
@@ -145,10 +145,10 @@ impl SpawnLocalExt for Env {
   fn spawn_local_promise<R, Fut>(
     &self,
     future: Fut,
-  ) -> napi::Result<JsObject>
+  ) -> napi_ohos::Result<JsObject>
   where
     R: NapiValue + 'static,
-    Fut: Future<Output = napi::Result<R>> + 'static,
+    Fut: Future<Output = napi_ohos::Result<R>> + 'static,
   {
     spawn_local_promise(self, future)
   }

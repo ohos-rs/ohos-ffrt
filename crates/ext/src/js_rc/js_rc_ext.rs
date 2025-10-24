@@ -1,6 +1,6 @@
-use napi::Env;
-use napi::NapiRaw;
-use napi::NapiValue;
+use napi_ohos::Env;
+use napi_ohos::NapiRaw;
+use napi_ohos::NapiValue;
 
 use super::JsRc;
 
@@ -10,14 +10,14 @@ pub trait JsRcExt<T: NapiRaw> {
   fn into_rc(
     self,
     env: &Env,
-  ) -> napi::Result<JsRc<T>>;
+  ) -> napi_ohos::Result<JsRc<T>>;
 }
 
 impl<T: NapiValue> JsRcExt<T> for T {
   fn into_rc(
     self,
     env: &Env,
-  ) -> napi::Result<JsRc<T>> {
+  ) -> napi_ohos::Result<JsRc<T>> {
     JsRc::new(env, self)
   }
 }

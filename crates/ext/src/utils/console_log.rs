@@ -3,6 +3,7 @@ use napi_ohos::JsFunction;
 use napi_ohos::JsObject;
 use napi_ohos::JsString;
 use napi_ohos::NapiRaw;
+use napi_ohos::bindgen_prelude::JsObjectValue;
 
 pub fn console_log<V>(env: &Env, args: &[V]) -> napi_ohos::Result<()>
 where
