@@ -1,59 +1,45 @@
 use futures::Future;
-use napi_ohos::Env;
-use napi_ohos::JsObject;
-use napi_ohos::NapiValue;
+use napi_ohos::{
+    Env, Error, JsValue, Result, Status, Unknown, bindgen_prelude::SendableResolver, sys,
+};
+use ohos_ffrt::Runtime;
 
-use crate::runtime;
-use crate::utils::UtilsExt;
+pub fn spawn_local<
+    Data: 'static + Send,
+    Fut: 'static + Send + Future<Output = std::result::Result<Data, impl Into<Error>>>,
+    Resolver: 'static + FnOnce(sys::napi_env, Data) -> Result<sys::napi_value>,
+>(
+    env: sys::napi_env,
+    fut: Fut,
+    resolver: Resolver,
+) -> Result<sys::napi_value> {
+    let env = Env::from(env);
 
-pub fn spawn_local<Fut>(
-  env: &Env,
-  future: Fut,
-) -> napi_ohos::Result<()>
-where
-  Fut: Future<Output = napi_ohos::Result<()>> + 'static,
-{
-  runtime::spawn_local_fut(*env, async move {
-    if let Err(error) = future.await {
-      eprintln!("Uncaught Napi Error: {}", error);
+    let (deferred, promise) = env.create_deferred::<Unknown<'_>, _>()?;
+
+    let deferred_for_panic = deferred.clone();
+    let sendable_resolver = SendableResolver::new(resolver);
+
+    let inner = async move {
+        match fut.await {
+            Ok(v) => deferred.resolve(move |env| {
+                sendable_resolver
+                    .resolve(env.raw(), v)
+                    .map(|v| unsafe { Unknown::from_raw_unchecked(env.raw(), v) })
+            }),
+            Err(e) => deferred.reject(e.into()),
+        }
     };
-  })?;
 
-  Ok(())
-}
+    let runtime = Runtime::new();
 
-pub fn spawn_local_promise<R, Fut>(
-  env: &Env,
-  future: Fut,
-) -> napi_ohos::Result<JsObject>
-where
-  R: NapiValue + 'static,
-  Fut: Future<Output = napi_ohos::Result<R>> + 'static,
-{
-  env.create_promise(Box::new(move |env, resolve_func, reject_func| {
-    runtime::spawn_local_fut(env, async move {
-      match future.await {
-        Ok(result) => resolve_func(result),
-        Err(error) => reject_func(error),
-      };
-    })
-  }))
-}
+    let jh = runtime.spawn(inner);
 
-pub fn spawn_local_promise2<R, F, Fut>(
-  env: &Env,
-  future: Fut,
-) -> napi_ohos::Result<JsObject>
-where
-  R: NapiValue + 'static,
-  Fut: Future<Output = napi_ohos::Result<R>> + 'static,
-{
-  env.create_promise(Box::new(move |env, resolve_func, reject_func| {
-    runtime::spawn_local_fut(env, async move {
-      match future.await {
-        Ok(result) => resolve_func(result),
-        Err(error) => reject_func(error),
-      };
-    })
-  }))
+    runtime.spawn(async move {
+        if let Err(err) = jh.await {
+            deferred_for_panic.reject(Error::new(Status::GenericFailure, err.to_string()));
+        }
+    });
+
+    Ok(promise.raw())
 }

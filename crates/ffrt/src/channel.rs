@@ -1,9 +1,9 @@
 //! 异步Channel
 
 use ohos_ffrt_sys::*;
+use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::cell::UnsafeCell;
 
 /// 创建有界channel
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
@@ -27,9 +27,11 @@ pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
         capacity,
         closed: UnsafeCell::new(false),
     });
-    
+
     (
-        Sender { shared: shared.clone() },
+        Sender {
+            shared: shared.clone(),
+        },
         Receiver { shared },
     )
 }
@@ -66,29 +68,30 @@ impl<T> Sender<T> {
     pub async fn send(&self, value: T) -> Result<(), T> {
         unsafe {
             ffrt_mutex_lock(&self.shared.mutex as *const _ as *mut _);
-            
+
             // 等待队列有空间
-            while (*self.shared.queue.get()).len() >= self.shared.capacity 
-                && !*self.shared.closed.get() {
+            while (*self.shared.queue.get()).len() >= self.shared.capacity
+                && !*self.shared.closed.get()
+            {
                 ffrt_cond_wait(
                     &self.shared.cond_send as *const _ as *mut _,
                     &self.shared.mutex as *const _ as *mut _,
                 );
             }
-            
+
             if *self.shared.closed.get() {
                 ffrt_mutex_unlock(&self.shared.mutex as *const _ as *mut _);
                 return Err(value);
             }
-            
+
             (*self.shared.queue.get()).push_back(value);
             ffrt_cond_signal(&self.shared.cond_recv as *const _ as *mut _);
             ffrt_mutex_unlock(&self.shared.mutex as *const _ as *mut _);
         }
-        
+
         Ok(())
     }
-    
+
     /// 关闭channel
     pub fn close(&self) {
         unsafe {
@@ -119,7 +122,7 @@ impl<T> Receiver<T> {
     pub async fn recv(&self) -> Option<T> {
         unsafe {
             ffrt_mutex_lock(&self.shared.mutex as *const _ as *mut _);
-            
+
             // 等待队列有数据
             while (*self.shared.queue.get()).is_empty() && !*self.shared.closed.get() {
                 ffrt_cond_wait(
@@ -127,13 +130,13 @@ impl<T> Receiver<T> {
                     &self.shared.mutex as *const _ as *mut _,
                 );
             }
-            
+
             let value = (*self.shared.queue.get()).pop_front();
-            
+
             if value.is_some() {
                 ffrt_cond_signal(&self.shared.cond_send as *const _ as *mut _);
             }
-            
+
             ffrt_mutex_unlock(&self.shared.mutex as *const _ as *mut _);
             value
         }

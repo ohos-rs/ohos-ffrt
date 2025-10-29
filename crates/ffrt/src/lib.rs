@@ -4,14 +4,16 @@ pub mod channel;
 pub mod mutex;
 pub mod runtime;
 pub mod rwlock;
+pub mod utils;
 
 pub use channel::{Receiver, Sender, channel};
 pub use mutex::Mutex;
-pub use runtime::{JoinHandle, Runtime, sleep, wait_all, yield_now};
+pub use runtime::{JoinHandle, Result, Runtime, RuntimeError, sleep, wait_all, yield_now};
 pub use rwlock::RwLock;
+pub use utils::*;
 
 /// 在默认运行时上执行future
-pub fn block_on<F>(future: F) -> F::Output
+pub fn block_on<F>(future: F) -> Result<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,

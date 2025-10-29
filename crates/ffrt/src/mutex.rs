@@ -1,8 +1,8 @@
 //! 异步互斥锁
 
 use ohos_ffrt_sys::*;
-use std::ops::{Deref, DerefMut};
 use std::cell::UnsafeCell;
+use std::ops::{Deref, DerefMut};
 
 /// 异步互斥锁
 pub struct Mutex<T> {
@@ -20,13 +20,13 @@ impl<T> Mutex<T> {
         unsafe {
             ffrt_mutex_init(&mut inner, std::ptr::null());
         }
-        
+
         Self {
             inner,
             data: UnsafeCell::new(value),
         }
     }
-    
+
     /// 锁定互斥锁
     pub async fn lock(&self) -> MutexGuard<'_, T> {
         unsafe {
@@ -34,13 +34,11 @@ impl<T> Mutex<T> {
         }
         MutexGuard { mutex: self }
     }
-    
+
     /// 尝试锁定互斥锁
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        let result = unsafe {
-            ffrt_mutex_trylock(&self.inner as *const _ as *mut _)
-        };
-        
+        let result = unsafe { ffrt_mutex_trylock(&self.inner as *const _ as *mut _) };
+
         if result == 0 {
             Some(MutexGuard { mutex: self })
         } else {
@@ -64,7 +62,7 @@ pub struct MutexGuard<'a, T> {
 
 impl<T> Deref for MutexGuard<'_, T> {
     type Target = T;
-    
+
     fn deref(&self) -> &T {
         unsafe { &*self.mutex.data.get() }
     }

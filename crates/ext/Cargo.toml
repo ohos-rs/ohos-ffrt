@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 ohos-ext-macro = { workspace = true }
+ohos-ffrt = { workspace = true }
+ohos-ffrt-sys = { workspace = true }
 napi-ohos = { workspace = true, features = ["compat-mode"] }
 futures = { workspace = true }
 once_cell = { workspace = true }
