@@ -1,12 +1,10 @@
-//! 异步互斥锁
-
 use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 
 /// 异步互斥锁
 pub struct Mutex<T> {
-    inner: FfrtMutex,
+    inner: ffrt_mutex_t,
     data: UnsafeCell<T>,
 }
 

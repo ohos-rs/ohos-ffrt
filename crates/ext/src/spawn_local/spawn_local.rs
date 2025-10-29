@@ -1,7 +1,5 @@
 use futures::Future;
-use napi_ohos::{
-    Env, Error, JsValue, Result, Status, Unknown, bindgen_prelude::SendableResolver, sys,
-};
+use napi_ohos::{Env, Error, JsValue, Result, SendableResolver, Status, Unknown, sys};
 use ohos_ffrt::Runtime;
 
 pub fn spawn_local<

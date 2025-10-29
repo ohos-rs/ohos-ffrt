@@ -1,9 +1,7 @@
-mod internal;
-mod js_rc;
-mod runtime;
 mod spawn_local;
+mod tsfn_local;
 
 pub use ohos_ext_macro::*;
 
-pub use self::js_rc::*;
 pub use self::spawn_local::*;
+pub use self::tsfn_local::*;

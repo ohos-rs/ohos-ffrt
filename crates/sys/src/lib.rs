@@ -2,20 +2,13 @@
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
-pub type __darwin_time_t = ::std::os::raw::c_long;
+pub type time_t = ::std::os::raw::c_long;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct timespec {
-    pub tv_sec: __darwin_time_t,
+    pub tv_sec: time_t,
     pub tv_nsec: ::std::os::raw::c_long,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of timespec"][::std::mem::size_of::<timespec>() - 16usize];
-    ["Alignment of timespec"][::std::mem::align_of::<timespec>() - 8usize];
-    ["Offset of field: timespec::tv_sec"][::std::mem::offset_of!(timespec, tv_sec) - 0usize];
-    ["Offset of field: timespec::tv_nsec"][::std::mem::offset_of!(timespec, tv_nsec) - 8usize];
-};
 #[doc = " Should be distributed at once if possible, handle time equals to send time, prior to high level."]
 pub const ffrt_queue_priority_t_ffrt_queue_priority_immediate: ffrt_queue_priority_t = 0;
 #[doc = " High priority, sorted by handle time, prior to low level."]
@@ -54,18 +47,6 @@ pub struct ffrt_function_header_t {
     #[doc = " Need to be set to 0."]
     pub reserve: [u64; 2usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_function_header_t"][::std::mem::size_of::<ffrt_function_header_t>() - 32usize];
-    ["Alignment of ffrt_function_header_t"]
-        [::std::mem::align_of::<ffrt_function_header_t>() - 8usize];
-    ["Offset of field: ffrt_function_header_t::exec"]
-        [::std::mem::offset_of!(ffrt_function_header_t, exec) - 0usize];
-    ["Offset of field: ffrt_function_header_t::destroy"]
-        [::std::mem::offset_of!(ffrt_function_header_t, destroy) - 8usize];
-    ["Offset of field: ffrt_function_header_t::reserve"]
-        [::std::mem::offset_of!(ffrt_function_header_t, reserve) - 16usize];
-};
 #[doc = " Task attribute storage size."]
 pub const ffrt_storage_size_t_ffrt_task_attr_storage_size: ffrt_storage_size_t = 128;
 #[doc = " Task executor storage size."]
@@ -102,15 +83,6 @@ pub struct ffrt_dependence_t {
     #[doc = " Dependency pointer."]
     pub ptr: *const ::std::os::raw::c_void,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_dependence_t"][::std::mem::size_of::<ffrt_dependence_t>() - 16usize];
-    ["Alignment of ffrt_dependence_t"][::std::mem::align_of::<ffrt_dependence_t>() - 8usize];
-    ["Offset of field: ffrt_dependence_t::type_"]
-        [::std::mem::offset_of!(ffrt_dependence_t, type_) - 0usize];
-    ["Offset of field: ffrt_dependence_t::ptr"]
-        [::std::mem::offset_of!(ffrt_dependence_t, ptr) - 8usize];
-};
 #[doc = " @brief Defines the dependency structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -120,13 +92,6 @@ pub struct ffrt_deps_t {
     #[doc = " Dependency data."]
     pub items: *const ffrt_dependence_t,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_deps_t"][::std::mem::size_of::<ffrt_deps_t>() - 16usize];
-    ["Alignment of ffrt_deps_t"][::std::mem::align_of::<ffrt_deps_t>() - 8usize];
-    ["Offset of field: ffrt_deps_t::len"][::std::mem::offset_of!(ffrt_deps_t, len) - 0usize];
-    ["Offset of field: ffrt_deps_t::items"][::std::mem::offset_of!(ffrt_deps_t, items) - 8usize];
-};
 #[doc = " @brief Defines the task attribute structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -134,13 +99,6 @@ pub struct ffrt_task_attr_t {
     #[doc = " An array of uint32_t used to store the task attribute."]
     pub storage: [u32; 32usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_task_attr_t"][::std::mem::size_of::<ffrt_task_attr_t>() - 128usize];
-    ["Alignment of ffrt_task_attr_t"][::std::mem::align_of::<ffrt_task_attr_t>() - 4usize];
-    ["Offset of field: ffrt_task_attr_t::storage"]
-        [::std::mem::offset_of!(ffrt_task_attr_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the queue attribute structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -148,13 +106,6 @@ pub struct ffrt_queue_attr_t {
     #[doc = " An array of uint32_t used to store the queue attribute."]
     pub storage: [u32; 32usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_queue_attr_t"][::std::mem::size_of::<ffrt_queue_attr_t>() - 128usize];
-    ["Alignment of ffrt_queue_attr_t"][::std::mem::align_of::<ffrt_queue_attr_t>() - 4usize];
-    ["Offset of field: ffrt_queue_attr_t::storage"]
-        [::std::mem::offset_of!(ffrt_queue_attr_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the task handle, which identifies different tasks.\n\n @since 10"]
 pub type ffrt_task_handle_t = *mut ::std::os::raw::c_void;
 #[doc = " A generic error."]
@@ -164,7 +115,7 @@ pub const ffrt_error_t_ffrt_success: ffrt_error_t = 0;
 #[doc = " An out of memory error."]
 pub const ffrt_error_t_ffrt_error_nomem: ffrt_error_t = 12;
 #[doc = " A timeout error."]
-pub const ffrt_error_t_ffrt_error_timedout: ffrt_error_t = 60;
+pub const ffrt_error_t_ffrt_error_timedout: ffrt_error_t = 110;
 #[doc = " A busy error."]
 pub const ffrt_error_t_ffrt_error_busy: ffrt_error_t = 16;
 #[doc = " A invalid value error."]
@@ -178,13 +129,6 @@ pub struct ffrt_condattr_t {
     #[doc = " A long integer used to store the condition variable attribute."]
     pub storage: ::std::os::raw::c_long,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_condattr_t"][::std::mem::size_of::<ffrt_condattr_t>() - 8usize];
-    ["Alignment of ffrt_condattr_t"][::std::mem::align_of::<ffrt_condattr_t>() - 8usize];
-    ["Offset of field: ffrt_condattr_t::storage"]
-        [::std::mem::offset_of!(ffrt_condattr_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the mutex attribute structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -192,13 +136,6 @@ pub struct ffrt_mutexattr_t {
     #[doc = " A long integer used to store the mutex attribute."]
     pub storage: ::std::os::raw::c_long,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_mutexattr_t"][::std::mem::size_of::<ffrt_mutexattr_t>() - 8usize];
-    ["Alignment of ffrt_mutexattr_t"][::std::mem::align_of::<ffrt_mutexattr_t>() - 8usize];
-    ["Offset of field: ffrt_mutexattr_t::storage"]
-        [::std::mem::offset_of!(ffrt_mutexattr_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the rwlock attribute structure.\n\n @since 18"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -206,13 +143,6 @@ pub struct ffrt_rwlockattr_t {
     #[doc = " A long integer used to store the rwlock attribute."]
     pub storage: ::std::os::raw::c_long,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_rwlockattr_t"][::std::mem::size_of::<ffrt_rwlockattr_t>() - 8usize];
-    ["Alignment of ffrt_rwlockattr_t"][::std::mem::align_of::<ffrt_rwlockattr_t>() - 8usize];
-    ["Offset of field: ffrt_rwlockattr_t::storage"]
-        [::std::mem::offset_of!(ffrt_rwlockattr_t, storage) - 0usize];
-};
 #[doc = " Normal mutex type."]
 pub const ffrt_mutex_type_ffrt_mutex_normal: ffrt_mutex_type = 0;
 #[doc = " Recursive mutex type."]
@@ -228,13 +158,6 @@ pub struct ffrt_mutex_t {
     #[doc = " An array of uint32_t used to store the mutex."]
     pub storage: [u32; 16usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_mutex_t"][::std::mem::size_of::<ffrt_mutex_t>() - 64usize];
-    ["Alignment of ffrt_mutex_t"][::std::mem::align_of::<ffrt_mutex_t>() - 4usize];
-    ["Offset of field: ffrt_mutex_t::storage"]
-        [::std::mem::offset_of!(ffrt_mutex_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the rwlock structure.\n\n @since 18"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -242,13 +165,6 @@ pub struct ffrt_rwlock_t {
     #[doc = " An array of uint32_t used to store the rwlock."]
     pub storage: [u32; 16usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_rwlock_t"][::std::mem::size_of::<ffrt_rwlock_t>() - 64usize];
-    ["Alignment of ffrt_rwlock_t"][::std::mem::align_of::<ffrt_rwlock_t>() - 4usize];
-    ["Offset of field: ffrt_rwlock_t::storage"]
-        [::std::mem::offset_of!(ffrt_rwlock_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the condition variable structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -256,13 +172,6 @@ pub struct ffrt_cond_t {
     #[doc = " An array of uint32_t used to store the condition variable."]
     pub storage: [u32; 16usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_cond_t"][::std::mem::size_of::<ffrt_cond_t>() - 64usize];
-    ["Alignment of ffrt_cond_t"][::std::mem::align_of::<ffrt_cond_t>() - 4usize];
-    ["Offset of field: ffrt_cond_t::storage"]
-        [::std::mem::offset_of!(ffrt_cond_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the fiber structure.\n\n @since 20"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -270,13 +179,6 @@ pub struct ffrt_fiber_t {
     #[doc = " An array of uint32_t used to store the fiber."]
     pub storage: [usize; 22usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ffrt_fiber_t"][::std::mem::size_of::<ffrt_fiber_t>() - 176usize];
-    ["Alignment of ffrt_fiber_t"][::std::mem::align_of::<ffrt_fiber_t>() - 8usize];
-    ["Offset of field: ffrt_fiber_t::storage"]
-        [::std::mem::offset_of!(ffrt_fiber_t, storage) - 0usize];
-};
 #[doc = " @brief Defines the poller callback function type.\n\n @since 12"]
 pub type ffrt_poller_cb =
     ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, event: u32)>;

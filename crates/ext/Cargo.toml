@@ -7,6 +7,6 @@ edition = "2024"
 ohos-ext-macro = { workspace = true }
 ohos-ffrt = { workspace = true }
 ohos-ffrt-sys = { workspace = true }
-napi-ohos = { workspace = true, features = ["compat-mode"] }
+napi-ohos = { workspace = true }
 futures = { workspace = true }
 once_cell = { workspace = true }

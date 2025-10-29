@@ -10,13 +10,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-napi-ohos = { workspace = true, default-features = false, features = [
-    "napi8",
-    "async",
-] }
+napi-ohos = { workspace = true, default-features = false, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
-async-std = { workspace = true }
-futures = { workspace = true }
 ohos-ext = { workspace = true }
 
 ohos-hilog-binding = { version = "*" }

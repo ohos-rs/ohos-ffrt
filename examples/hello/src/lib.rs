@@ -12,7 +12,7 @@ pub fn example_a<'env>(
 ) -> napi_ohos::Result<PromiseRaw<'env, ()>> {
     let tsfn = callback.build_threadsafe_function().build()?;
     env.spawn_local(async move {
-        let msg = tsfn.call_async((1, 2, 3).into()).await?;
+        let msg = tsfn.call_local(Ok((1, 2, 3).into())).await?;
         ohos_hilog_binding::hilog_info!("msg: {}", msg);
         Ok(())
     })

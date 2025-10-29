@@ -1,8 +1,3 @@
-//! 异步运行时 - Tokio风格的FFRT运行时
-//!
-//! 这个模块提供了一个类似Tokio的异步运行时，基于鸿蒙的FFRT框架。
-//! 支持future执行、任务生成、超时、channel等异步操作。
-
 use ohos_ffrt_sys::*;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -210,21 +205,17 @@ fn submit_task_to_ffrt(wrapper: Arc<FfrtTaskWrapper>) {
         wrapper.poll();
     }
 
-    extern "C" fn cleanup_fn(_arg: *mut std::ffi::c_void) {
-        // 清理函数
-    }
-
     unsafe {
-        let mut attr = std::mem::MaybeUninit::<FfrtTaskAttr>::uninit();
+        let mut attr = std::mem::MaybeUninit::<ffrt_task_attr_t>::uninit();
         ffrt_task_attr_init(attr.as_mut_ptr());
-        ffrt_task_attr_set_qos(attr.as_mut_ptr(), FfrtQos::Default);
+        ffrt_task_attr_set_qos(attr.as_mut_ptr(), ffrt_qos_default_t_ffrt_qos_default);
 
         // 增加引用计数，传递给FFRT
         let wrapper_ptr = Arc::into_raw(wrapper) as *mut std::ffi::c_void;
 
-        ffrt_submit_base(
-            task_fn,
-            cleanup_fn,
+        // 使用简化的API提交任务
+        ffrt_submit_f(
+            Some(task_fn),
             wrapper_ptr,
             std::ptr::null(),
             std::ptr::null(),

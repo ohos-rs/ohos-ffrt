@@ -1,12 +1,10 @@
-//! 异步读写锁
-
 use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 
 /// 异步读写锁
 pub struct RwLock<T> {
-    inner: FfrtRwlock,
+    inner: ffrt_rwlock_t,
     data: UnsafeCell<T>,
 }
 
