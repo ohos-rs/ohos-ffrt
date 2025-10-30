@@ -2,7 +2,7 @@ use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 
-/// 异步互斥锁
+/// FFRT互斥锁 - 基于FFRT原生mutex实现
 pub struct Mutex<T> {
     inner: ffrt_mutex_t,
     data: UnsafeCell<T>,
@@ -25,15 +25,19 @@ impl<T> Mutex<T> {
         }
     }
 
-    /// 锁定互斥锁
-    pub async fn lock(&self) -> MutexGuard<'_, T> {
-        unsafe {
-            ffrt_mutex_lock(&self.inner as *const _ as *mut _);
+    /// 锁定互斥锁（同步阻塞）
+    /// FFRT的mutex_lock本身就是协程感知的，会自动让出执行权
+    pub fn lock(&self) -> Result<MutexGuard<'_, T>, ()> {
+        let result = unsafe { ffrt_mutex_lock(&self.inner as *const _ as *mut _) };
+
+        if result == 0 {
+            Ok(MutexGuard { mutex: self })
+        } else {
+            Err(())
         }
-        MutexGuard { mutex: self }
     }
 
-    /// 尝试锁定互斥锁
+    /// 尝试锁定互斥锁（非阻塞）
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         let result = unsafe { ffrt_mutex_trylock(&self.inner as *const _ as *mut _) };
 

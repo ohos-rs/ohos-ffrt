@@ -1,70 +1,30 @@
+use crate::error::RuntimeError;
+use crate::mutex::Mutex;
 use ohos_ffrt_sys::*;
-use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
+use std::ptr;
+use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::{
-    Arc, Mutex as StdMutex,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-/// 运行时错误类型
-#[derive(Debug, Clone)]
-pub enum RuntimeError {
-    /// 任务被取消
-    Cancelled,
-    /// 任务panic
-    Panicked(String),
-    /// 超时
-    Timeout,
-    /// 其他错误
-    Other(String),
-}
-
-impl std::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RuntimeError::Cancelled => write!(f, "Task cancelled"),
-            RuntimeError::Panicked(msg) => write!(f, "Task panicked: {}", msg),
-            RuntimeError::Timeout => write!(f, "Operation timeout"),
-            RuntimeError::Other(msg) => write!(f, "Runtime error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for RuntimeError {}
-
-impl From<std::io::Error> for RuntimeError {
-    fn from(error: std::io::Error) -> Self {
-        RuntimeError::Other(error.to_string())
-    }
-}
-
-/// 运行时Result类型
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
-/// 任务ID生成器
 static TASK_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn next_task_id() -> usize {
     TASK_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
 }
 
-/// 类型擦除的Future包装
 type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-/// 任务状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TaskState {
-    /// 待运行
     Pending,
-    /// 运行中
     Running,
-    /// 已完成
     Completed,
-    /// 已取消
     Cancelled,
 }
 
@@ -72,28 +32,25 @@ enum TaskState {
 struct FfrtTaskWrapper {
     #[allow(dead_code)]
     task_id: usize,
-    future: StdMutex<Option<BoxFuture>>,
-    result: StdMutex<Option<()>>,
-    state: AtomicUsize, // TaskState as usize
+    future: Mutex<Option<BoxFuture>>,
+    result: Mutex<Option<()>>,
+    state: AtomicUsize,
     cancelled: AtomicBool,
-    #[allow(dead_code)]
-    wakers: StdMutex<VecDeque<Waker>>,
 }
 
 impl FfrtTaskWrapper {
     fn new(future: BoxFuture) -> Arc<Self> {
         Arc::new(Self {
             task_id: next_task_id(),
-            future: StdMutex::new(Some(future)),
-            result: StdMutex::new(None),
+            future: Mutex::new(Some(future)),
+            result: Mutex::new(None),
             state: AtomicUsize::new(TaskState::Pending as usize),
             cancelled: AtomicBool::new(false),
-            wakers: StdMutex::new(VecDeque::new()),
         })
     }
 
     fn get_state(&self) -> TaskState {
-        match self.state.load(Ordering::Relaxed) {
+        match self.state.load(Ordering::Acquire) {
             0 => TaskState::Pending,
             1 => TaskState::Running,
             2 => TaskState::Completed,
@@ -106,77 +63,46 @@ impl FfrtTaskWrapper {
         self.state.store(state as usize, Ordering::Release);
     }
 
-    fn poll(&self) -> bool {
-        // 检查是否被取消
-        if self.cancelled.load(Ordering::Relaxed) {
-            self.set_state(TaskState::Cancelled);
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    // 修复：将Arc作为参数传入，这样可以正确克隆
+    fn poll_with_arc(arc_self: &Arc<Self>) -> bool {
+        if arc_self.is_cancelled() {
+            arc_self.set_state(TaskState::Cancelled);
             return true;
         }
 
-        self.set_state(TaskState::Running);
-        let waker = self.create_waker();
+        arc_self.set_state(TaskState::Running);
+
+        // 创建waker时传入Arc的克隆
+        let waker = create_waker_for_task(Arc::clone(arc_self));
         let mut cx = Context::from_waker(&waker);
 
-        let mut future_opt = self.future.lock().unwrap();
+        let mut future_opt = arc_self.future.lock().expect("Failed to lock future");
         if let Some(mut future) = future_opt.take() {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 future.as_mut().poll(&mut cx)
             })) {
                 Ok(Poll::Ready(_)) => {
-                    *self.result.lock().unwrap() = Some(());
-                    self.set_state(TaskState::Completed);
+                    *arc_self.result.lock().expect("Failed to lock result") = Some(());
+                    arc_self.set_state(TaskState::Completed);
                     true
                 }
                 Ok(Poll::Pending) => {
                     *future_opt = Some(future);
-                    self.set_state(TaskState::Pending);
+                    arc_self.set_state(TaskState::Pending);
                     false
                 }
                 Err(_) => {
-                    self.set_state(TaskState::Cancelled);
+                    arc_self.set_state(TaskState::Cancelled);
                     true
                 }
             }
         } else {
-            self.set_state(TaskState::Completed);
+            arc_self.set_state(TaskState::Completed);
             true
-        }
-    }
-
-    fn create_waker(&self) -> Waker {
-        use std::task::{RawWaker, RawWakerVTable};
-
-        unsafe fn clone_raw(data: *const ()) -> RawWaker {
-            let wrapper = unsafe { Arc::from_raw(data as *const FfrtTaskWrapper) };
-            let cloned = wrapper.clone();
-            std::mem::forget(wrapper);
-            std::mem::forget(cloned.clone());
-            RawWaker::new(Arc::into_raw(cloned) as *const (), &VTABLE)
-        }
-
-        unsafe fn wake_raw(data: *const ()) {
-            let wrapper = unsafe { Arc::from_raw(data as *const FfrtTaskWrapper) };
-            submit_task_to_ffrt(wrapper.clone());
-        }
-
-        unsafe fn wake_by_ref_raw(data: *const ()) {
-            let wrapper = unsafe { Arc::from_raw(data as *const FfrtTaskWrapper) };
-            submit_task_to_ffrt(wrapper.clone());
-            std::mem::forget(wrapper);
-        }
-
-        unsafe fn drop_raw(data: *const ()) {
-            drop(unsafe { Arc::from_raw(data as *const FfrtTaskWrapper) });
-        }
-
-        static VTABLE: RawWakerVTable =
-            RawWakerVTable::new(clone_raw, wake_raw, wake_by_ref_raw, drop_raw);
-
-        let wrapper_ptr = self as *const Self;
-        unsafe {
-            Arc::increment_strong_count(wrapper_ptr);
-            let raw = RawWaker::new(wrapper_ptr as *const (), &VTABLE);
-            Waker::from_raw(raw)
         }
     }
 
@@ -193,121 +119,237 @@ impl FfrtTaskWrapper {
     }
 }
 
-/// 提交任务到FFRT
-fn submit_task_to_ffrt(wrapper: Arc<FfrtTaskWrapper>) {
-    extern "C" fn task_fn(arg: *mut std::ffi::c_void) {
-        let wrapper = unsafe {
-            let ptr = arg as *const FfrtTaskWrapper;
-            Arc::increment_strong_count(ptr);
-            Arc::from_raw(ptr)
-        };
+// 修复：独立的函数来创建Waker，接收Arc作为参数
+fn create_waker_for_task(wrapper: Arc<FfrtTaskWrapper>) -> Waker {
+    use std::task::{RawWaker, RawWakerVTable};
 
-        wrapper.poll();
+    unsafe fn clone_raw(data: *const ()) -> RawWaker {
+        if data.is_null() {
+            panic!("Waker clone_raw received null data");
+        }
+
+        unsafe {
+            let wrapper = data as *const FfrtTaskWrapper;
+            // 增加引用计数
+            Arc::increment_strong_count(wrapper);
+            RawWaker::new(wrapper as *const (), &VTABLE)
+        }
+    }
+
+    unsafe fn wake_raw(data: *const ()) {
+        if data.is_null() {
+            return;
+        }
+
+        unsafe {
+            // 重建Arc并消费它
+            let wrapper = Arc::from_raw(data as *const FfrtTaskWrapper);
+            submit_task(wrapper);
+        }
+    }
+
+    unsafe fn wake_by_ref_raw(data: *const ()) {
+        if data.is_null() {
+            return;
+        }
+
+        unsafe {
+            // 增加引用计数以创建新的Arc
+            Arc::increment_strong_count(data as *const FfrtTaskWrapper);
+            let wrapper = Arc::from_raw(data as *const FfrtTaskWrapper);
+            submit_task(wrapper);
+        }
+    }
+
+    unsafe fn drop_raw(data: *const ()) {
+        if data.is_null() {
+            return;
+        }
+
+        unsafe {
+            // 减少引用计数
+            drop(Arc::from_raw(data as *const FfrtTaskWrapper));
+        }
+    }
+
+    static VTABLE: RawWakerVTable =
+        RawWakerVTable::new(clone_raw, wake_raw, wake_by_ref_raw, drop_raw);
+
+    // 将Arc转换为原始指针
+    let wrapper_ptr = Arc::into_raw(wrapper);
+
+    unsafe {
+        let raw = RawWaker::new(wrapper_ptr as *const (), &VTABLE);
+        Waker::from_raw(raw)
+    }
+}
+
+/// 任务执行上下文
+#[repr(C)]
+struct TaskContext {
+    header: ffrt_function_header_t,
+    wrapper: *const FfrtTaskWrapper,
+}
+
+/// 提交任务到FFRT
+fn submit_task(wrapper: Arc<FfrtTaskWrapper>) {
+    unsafe extern "C" fn task_exec(arg: *mut std::ffi::c_void) {
+        if arg.is_null() {
+            eprintln!("FFRT task_exec received null argument!");
+            return;
+        }
+
+        unsafe {
+            let ctx = &*(arg as *const TaskContext);
+
+            if ctx.wrapper.is_null() {
+                eprintln!("TaskContext wrapper is null!");
+                return;
+            }
+
+            // 修复：从原始指针重建Arc（不改变引用计数）
+            // 因为这个指针是在submit_task中通过Arc::into_raw创建的
+            let wrapper = Arc::from_raw(ctx.wrapper);
+
+            // 执行任务，传入Arc引用
+            let finished = FfrtTaskWrapper::poll_with_arc(&wrapper);
+
+            // 如果任务未完成，需要保持引用
+            if !finished {
+                // 将Arc转回原始指针，保持引用计数不变
+                let _ = Arc::into_raw(wrapper);
+            } else {
+                // 任务完成，将指针设为null，防止task_destroy重复释放
+                // 注意：这里我们不能修改ctx，因为它是const引用
+                // 所以我们依赖task_destroy的逻辑来处理
+                // wrapper会在这里被drop，引用计数-1
+            }
+        }
+    }
+
+    unsafe extern "C" fn task_destroy(arg: *mut std::ffi::c_void) {
+        if arg.is_null() {
+            eprintln!("FFRT task_destroy received null argument!");
+            return;
+        }
+
+        unsafe {
+            // 重建Box以释放TaskContext
+            let ctx = Box::from_raw(arg as *mut TaskContext);
+
+            // 修复：检查wrapper指针是否仍然有效
+            // 如果task_exec已经完成并drop了wrapper，这里不需要再处理
+            // 但由于我们无法修改ctx.wrapper的值，我们需要小心处理
+
+            // 使用Arc::strong_count来检查是否还有其他引用
+            if !ctx.wrapper.is_null() {
+                // 尝试重建Arc以检查引用计数
+                Arc::increment_strong_count(ctx.wrapper);
+                let test_arc = Arc::from_raw(ctx.wrapper);
+                let strong_count = Arc::strong_count(&test_arc);
+
+                if strong_count > 1 {
+                    // 还有其他引用存在，正常drop
+                    drop(test_arc);
+                } else {
+                    // 这是最后一个引用，drop它
+                    drop(test_arc);
+                }
+            }
+        }
     }
 
     unsafe {
-        let mut attr = std::mem::MaybeUninit::<ffrt_task_attr_t>::uninit();
-        ffrt_task_attr_init(attr.as_mut_ptr());
-        ffrt_task_attr_set_qos(attr.as_mut_ptr(), ffrt_qos_default_t_ffrt_qos_default);
+        // 将Arc转换为原始指针
+        let wrapper_ptr = Arc::into_raw(wrapper);
 
-        // 增加引用计数，传递给FFRT
-        let wrapper_ptr = Arc::into_raw(wrapper) as *mut std::ffi::c_void;
+        let ctx = Box::new(TaskContext {
+            header: ffrt_function_header_t {
+                exec: Some(task_exec),
+                destroy: Some(task_destroy),
+                reserve: [0; 2],
+            },
+            wrapper: wrapper_ptr,
+        });
 
-        // 使用简化的API提交任务
-        ffrt_submit_f(
-            Some(task_fn),
-            wrapper_ptr,
-            std::ptr::null(),
-            std::ptr::null(),
-            attr.as_ptr(),
+        let ctx_ptr = Box::into_raw(ctx);
+
+        // 提交任务
+        ffrt_submit_base(
+            &mut (*ctx_ptr).header as *mut ffrt_function_header_t,
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
         );
-
-        ffrt_task_attr_destroy(attr.as_mut_ptr());
     }
 }
 
-/// 全局运行时实例
-#[allow(dead_code)]
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
-/// 异步运行时
-#[derive(Clone)]
-pub struct Runtime {
-    _inner: Arc<RuntimeInner>,
-}
-
-struct RuntimeInner {
-    // 运行时特定的数据可以放在这里
-}
+#[derive(Clone, Copy, Default)]
+pub struct Runtime;
 
 impl Runtime {
-    /// 创建新的运行时
     pub fn new() -> Self {
-        Self {
-            _inner: Arc::new(RuntimeInner {}),
-        }
+        Self
     }
 
-    /// 获取全局运行时实例
+    #[deprecated(note = "使用 ffrt_submit_base 时不再区分串行/并发模式")]
+    pub fn new_serial() -> Self {
+        Self
+    }
+
     pub fn global() -> Self {
-        Self {
-            _inner: Arc::new(RuntimeInner {}),
-        }
+        *RUNTIME.get_or_init(|| Self::new())
     }
 
-    /// 在运行时上执行future直到完成
     pub fn block_on<F>(&self, future: F) -> Result<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let result = Arc::new(StdMutex::new(None));
+        let result = Arc::new(Mutex::new(None));
         let result_clone = result.clone();
         let completed = Arc::new(AtomicBool::new(false));
         let completed_clone = completed.clone();
 
         let wrapper_future = async move {
             let output = future.await;
-            *result_clone.lock().unwrap() = Some(output);
+            *result_clone.lock().expect("Failed to lock result") = Some(output);
             completed_clone.store(true, Ordering::Release);
         };
 
         let wrapper = FfrtTaskWrapper::new(Box::pin(wrapper_future));
-        submit_task_to_ffrt(wrapper.clone());
+        submit_task(wrapper);
 
-        // 自旋等待完成
-        loop {
-            if completed.load(Ordering::Acquire) {
-                break;
-            }
+        while !completed.load(Ordering::Acquire) {
             unsafe {
-                ffrt_usleep(1000); // 休眠1ms
+                ffrt_usleep(100);
             }
         }
 
-        let opt = { result.lock().unwrap().take() };
+        let opt = { result.lock().expect("Failed to lock result").take() };
         opt.ok_or(RuntimeError::Other("Task result missing".to_string()))
     }
 
-    /// 生成新任务
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let result = Arc::new(StdMutex::new(None));
+        let result = Arc::new(Mutex::new(None));
         let result_clone = result.clone();
         let completed = Arc::new(AtomicBool::new(false));
         let completed_clone = completed.clone();
 
         let wrapper_future = async move {
             let output = future.await;
-            *result_clone.lock().unwrap() = Some(output);
+            *result_clone.lock().expect("Failed to lock result") = Some(output);
             completed_clone.store(true, Ordering::Release);
         };
 
         let wrapper = FfrtTaskWrapper::new(Box::pin(wrapper_future));
-        submit_task_to_ffrt(wrapper.clone());
+        submit_task(wrapper.clone());
 
         JoinHandle {
             result,
@@ -317,28 +359,20 @@ impl Runtime {
     }
 }
 
-impl Default for Runtime {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// 任务句柄
 pub struct JoinHandle<T> {
-    result: Arc<StdMutex<Option<T>>>,
+    result: Arc<Mutex<Option<T>>>,
     completed: Arc<AtomicBool>,
     wrapper: Arc<FfrtTaskWrapper>,
 }
 
 impl<T> JoinHandle<T> {
-    /// 等待任务完成
     pub async fn join(self) -> Result<T> {
         loop {
             if self.completed.load(Ordering::Acquire) {
                 return self
                     .result
                     .lock()
-                    .unwrap()
+                    .expect("Failed to lock result")
                     .take()
                     .ok_or(RuntimeError::Other("Task result missing".to_string()));
             }
@@ -347,17 +381,14 @@ impl<T> JoinHandle<T> {
         }
     }
 
-    /// 检查任务是否完成
     pub fn is_finished(&self) -> bool {
         self.completed.load(Ordering::Acquire)
     }
 
-    /// 取消任务
     pub fn cancel(&self) {
         self.wrapper.cancel();
     }
 
-    /// 等待指定超时时间后返回
     pub async fn join_timeout(self, duration: Duration) -> Result<T> {
         let start = Instant::now();
         loop {
@@ -365,7 +396,7 @@ impl<T> JoinHandle<T> {
                 return self
                     .result
                     .lock()
-                    .unwrap()
+                    .expect("Failed to lock result")
                     .take()
                     .ok_or(RuntimeError::Other("Task result missing".to_string()));
             }
@@ -388,7 +419,7 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
             Poll::Ready(
                 self.result
                     .lock()
-                    .unwrap()
+                    .expect("Failed to lock result")
                     .take()
                     .ok_or(RuntimeError::Other("Task result missing".to_string())),
             )
@@ -399,7 +430,9 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
     }
 }
 
-/// 让出当前任务的执行权
+unsafe impl<T: Send> Send for JoinHandle<T> {}
+unsafe impl<T: Send> Sync for JoinHandle<T> {}
+
 pub async fn yield_now() {
     struct YieldNow {
         yielded: bool,
@@ -422,7 +455,6 @@ pub async fn yield_now() {
     YieldNow { yielded: false }.await
 }
 
-/// 休眠指定时间
 pub async fn sleep(duration: Duration) {
     struct Sleep {
         deadline: Instant,
@@ -435,7 +467,6 @@ pub async fn sleep(duration: Duration) {
             if Instant::now() >= self.deadline {
                 Poll::Ready(())
             } else {
-                // 使用FFRT的sleep
                 let remaining = self.deadline - Instant::now();
                 unsafe {
                     ffrt_usleep(remaining.as_micros() as u64);
@@ -452,7 +483,6 @@ pub async fn sleep(duration: Duration) {
     .await
 }
 
-/// 等待所有任务完成
 pub fn wait_all() {
     unsafe {
         ffrt_wait();

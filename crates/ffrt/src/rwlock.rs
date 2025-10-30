@@ -2,7 +2,7 @@ use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 
-/// 异步读写锁
+/// FFRT读写锁 - 基于FFRT原生rwlock实现
 pub struct RwLock<T> {
     inner: ffrt_rwlock_t,
     data: UnsafeCell<T>,
@@ -25,23 +25,31 @@ impl<T> RwLock<T> {
         }
     }
 
-    /// 获取读锁
-    pub async fn read(&self) -> RwLockReadGuard<'_, T> {
-        unsafe {
-            ffrt_rwlock_rdlock(&self.inner as *const _ as *mut _);
+    /// 获取读锁（同步阻塞）
+    /// FFRT的rwlock_rdlock本身就是协程感知的，会自动让出执行权
+    pub fn read(&self) -> Result<RwLockReadGuard<'_, T>, ()> {
+        let result = unsafe { ffrt_rwlock_rdlock(&self.inner as *const _ as *mut _) };
+        
+        if result == 0 {
+            Ok(RwLockReadGuard { lock: self })
+        } else {
+            Err(())
         }
-        RwLockReadGuard { lock: self }
     }
 
-    /// 获取写锁
-    pub async fn write(&self) -> RwLockWriteGuard<'_, T> {
-        unsafe {
-            ffrt_rwlock_wrlock(&self.inner as *const _ as *mut _);
+    /// 获取写锁（同步阻塞）
+    /// FFRT的rwlock_wrlock本身就是协程感知的，会自动让出执行权
+    pub fn write(&self) -> Result<RwLockWriteGuard<'_, T>, ()> {
+        let result = unsafe { ffrt_rwlock_wrlock(&self.inner as *const _ as *mut _) };
+        
+        if result == 0 {
+            Ok(RwLockWriteGuard { lock: self })
+        } else {
+            Err(())
         }
-        RwLockWriteGuard { lock: self }
     }
 
-    /// 尝试获取读锁
+    /// 尝试获取读锁（非阻塞）
     pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T>> {
         let result = unsafe { ffrt_rwlock_tryrdlock(&self.inner as *const _ as *mut _) };
 
@@ -52,7 +60,7 @@ impl<T> RwLock<T> {
         }
     }
 
-    /// 尝试获取写锁
+    /// 尝试获取写锁（非阻塞）
     pub fn try_write(&self) -> Option<RwLockWriteGuard<'_, T>> {
         let result = unsafe { ffrt_rwlock_trywrlock(&self.inner as *const _ as *mut _) };
 
