@@ -1,8 +1,10 @@
 use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
+use std::ptr;
 
-/// FFRT互斥锁 - 基于FFRT原生mutex实现
+use crate::lock::LockError;
+
 pub struct Mutex<T> {
     inner: ffrt_mutex_t,
     data: UnsafeCell<T>,
@@ -14,10 +16,14 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 impl<T> Mutex<T> {
     /// 创建新的互斥锁
     pub fn new(value: T) -> Self {
-        let mut inner = unsafe { std::mem::zeroed() };
-        unsafe {
-            ffrt_mutex_init(&mut inner, std::ptr::null());
-        }
+        let mut inner: *mut ffrt_mutex_t = ptr::null_mut();
+        let result = unsafe { ffrt_mutex_init(&mut inner, ptr::null()) };
+
+        #[cfg(debug_assertions)]
+        assert!(
+            result == ffrt_error_t_ffrt_success,
+            "Failed to initialize mutex"
+        );
 
         Self {
             inner,
@@ -25,26 +31,27 @@ impl<T> Mutex<T> {
         }
     }
 
-    /// 锁定互斥锁（同步阻塞）
-    /// FFRT的mutex_lock本身就是协程感知的，会自动让出执行权
-    pub fn lock(&self) -> Result<MutexGuard<'_, T>, ()> {
+    pub fn lock(&self) -> Result<MutexGuard<'_, T>, LockError> {
         let result = unsafe { ffrt_mutex_lock(&self.inner as *const _ as *mut _) };
 
-        if result == 0 {
-            Ok(MutexGuard { mutex: self })
-        } else {
-            Err(())
+        match result {
+            ffrt_error_t_ffrt_success => Ok(MutexGuard { mutex: self }),
+            _ => Err(LockError::InnerError(format!(
+                "Failed to lock mutex: {}",
+                result
+            ))),
         }
     }
 
-    /// 尝试锁定互斥锁（非阻塞）
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+    pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, LockError> {
         let result = unsafe { ffrt_mutex_trylock(&self.inner as *const _ as *mut _) };
 
-        if result == 0 {
-            Some(MutexGuard { mutex: self })
-        } else {
-            None
+        match result {
+            ffrt_error_t_ffrt_success => Ok(MutexGuard { mutex: self }),
+            _ => Err(LockError::InnerError(format!(
+                "Failed to try lock mutex: {}",
+                result
+            ))),
         }
     }
 }
@@ -57,7 +64,6 @@ impl<T> Drop for Mutex<T> {
     }
 }
 
-/// 互斥锁守卫
 pub struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
 }
