@@ -1,4 +1,4 @@
-use std::ptr::{self, NonNull};
+use std::ptr::NonNull;
 
 use ohos_ffrt_sys::{
     ffrt_error_t_ffrt_success, ffrt_task_attr_get_delay, ffrt_task_attr_get_name,

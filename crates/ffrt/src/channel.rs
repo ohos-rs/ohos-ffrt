@@ -2,6 +2,7 @@ use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
@@ -40,7 +41,7 @@ impl<T> std::fmt::Display for SendError<T> {
 impl<T: std::fmt::Debug> std::error::Error for SendError<T> {}
 
 /// 创建 oneshot channel - 只能发送一条消息
-/// 使用FFRT的mutex和condition variable实现
+/// 使用 FFRT 的 mutex 和 condition variable 实现
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let shared = Arc::new(Shared::new());
 
@@ -59,26 +60,31 @@ struct Inner<T> {
     waker: Option<Waker>,
 }
 
-/// 基于FFRT同步原语的共享状态
+/// 基于 FFRT 同步原语的共享状态
 struct Shared<T> {
-    mutex: ffrt_mutex_t,
-    cond: ffrt_cond_t,
+    mutex: NonNull<ffrt_mutex_t>,
+    cond: NonNull<ffrt_cond_t>,
     data: UnsafeCell<Inner<T>>,
 }
 
 impl<T> Shared<T> {
     fn new() -> Self {
-        let mut mutex = unsafe { std::mem::zeroed() };
-        let mut cond = unsafe { std::mem::zeroed() };
+        use std::mem::MaybeUninit;
+
+        let mut uninit_mutex = Box::new(MaybeUninit::<ffrt_mutex_t>::uninit());
+        let mut uninit_cond = Box::new(MaybeUninit::<ffrt_cond_t>::uninit());
 
         unsafe {
-            ffrt_mutex_init(&mut mutex, std::ptr::null());
-            ffrt_cond_init(&mut cond, std::ptr::null());
+            ffrt_mutex_init(uninit_mutex.as_mut_ptr(), std::ptr::null());
+            ffrt_cond_init(uninit_cond.as_mut_ptr(), std::ptr::null());
         }
 
+        let mutex = unsafe { uninit_mutex.assume_init() };
+        let cond = unsafe { uninit_cond.assume_init() };
+
         Self {
-            mutex,
-            cond,
+            mutex: unsafe { NonNull::new_unchecked(Box::into_raw(mutex)) },
+            cond: unsafe { NonNull::new_unchecked(Box::into_raw(cond)) },
             data: UnsafeCell::new(Inner {
                 value: None,
                 sender_alive: true,
@@ -90,7 +96,7 @@ impl<T> Shared<T> {
 
     fn lock(&self) -> SharedGuard<'_, T> {
         unsafe {
-            ffrt_mutex_lock(&self.mutex as *const _ as *mut _);
+            ffrt_mutex_lock(self.mutex.as_ptr());
         }
         SharedGuard { shared: self }
     }
@@ -109,16 +115,9 @@ impl<'a, T> SharedGuard<'a, T> {
         unsafe { &mut *self.shared.data.get() }
     }
 
-    #[allow(dead_code)]
-    fn signal(&self) {
-        unsafe {
-            ffrt_cond_signal(&self.shared.cond as *const _ as *mut _);
-        }
-    }
-
     fn broadcast(&self) {
         unsafe {
-            ffrt_cond_broadcast(&self.shared.cond as *const _ as *mut _);
+            ffrt_cond_broadcast(self.shared.cond.as_ptr());
         }
     }
 }
@@ -126,7 +125,7 @@ impl<'a, T> SharedGuard<'a, T> {
 impl<'a, T> Drop for SharedGuard<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_mutex_unlock(&self.shared.mutex as *const _ as *mut _);
+            ffrt_mutex_unlock(self.shared.mutex.as_ptr());
         }
     }
 }
@@ -134,8 +133,8 @@ impl<'a, T> Drop for SharedGuard<'a, T> {
 impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_cond_destroy(&mut self.cond);
-            ffrt_mutex_destroy(&mut self.mutex);
+            ffrt_cond_destroy(self.cond.as_ptr());
+            ffrt_mutex_destroy(self.mutex.as_ptr());
         }
     }
 }
@@ -149,8 +148,8 @@ pub struct Sender<T> {
 }
 
 impl<T> Sender<T> {
-    /// 发送值到channel
-    /// 如果接收方已被drop，返回SendError
+    /// 发送值到 channel
+    /// 如果接收方已被 drop，返回 SendError
     pub fn send(self, value: T) -> Result<(), SendError<T>> {
         let mut guard = self.shared.lock();
 
@@ -162,10 +161,10 @@ impl<T> Sender<T> {
         // 设置值
         guard.inner_mut().value = Some(value);
 
-        // 唤醒等待的接收方（使用condition variable）
+        // 唤醒等待的接收方
         guard.broadcast();
 
-        // 如果有waker也唤醒它
+        // 如果有 waker 也唤醒它
         if let Some(waker) = guard.inner_mut().waker.take() {
             waker.wake();
         }
@@ -196,14 +195,14 @@ impl<T> Drop for Sender<T> {
         // 广播通知等待的接收方
         guard.broadcast();
 
-        // 如果有waker也唤醒它
+        // 如果有 waker 也唤醒它
         if let Some(waker) = guard.inner_mut().waker.take() {
             waker.wake();
         }
     }
 }
 
-/// 等待发送方关闭的Future
+/// 等待发送方关闭的 Future
 struct ClosedFuture<T> {
     shared: Arc<Shared<T>>,
 }
@@ -217,7 +216,7 @@ impl<T> Future for ClosedFuture<T> {
         if !guard.inner().receiver_alive {
             Poll::Ready(())
         } else {
-            // 保存waker以便在接收方关闭时被唤醒
+            // 保存 waker 以便在接收方关闭时被唤醒
             guard.inner_mut().waker = Some(cx.waker().clone());
             Poll::Pending
         }
@@ -268,7 +267,7 @@ impl<T> Future for Receiver<T> {
             return Poll::Ready(Err(RecvError::Closed));
         }
 
-        // 保存waker以便在值到达时被唤醒
+        // 保存 waker 以便在值到达时被唤醒
         guard.inner_mut().waker = Some(cx.waker().clone());
         Poll::Pending
     }

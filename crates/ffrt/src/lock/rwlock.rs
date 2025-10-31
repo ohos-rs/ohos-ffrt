@@ -37,7 +37,7 @@ impl<T> RwLock<T> {
     }
 
     pub fn read(&self) -> Result<RwLockReadGuard<'_, T>, LockError> {
-        let result = unsafe { ffrt_rwlock_rdlock(&self.inner as *const _ as *mut _) };
+        let result = unsafe { ffrt_rwlock_rdlock(self.inner.as_ptr()) };
 
         match result {
             ffrt_error_t_ffrt_success => Ok(RwLockReadGuard { lock: self }),
@@ -49,7 +49,7 @@ impl<T> RwLock<T> {
     }
 
     pub fn write(&self) -> Result<RwLockWriteGuard<'_, T>, LockError> {
-        let result = unsafe { ffrt_rwlock_wrlock(&self.inner as *const _ as *mut _) };
+        let result = unsafe { ffrt_rwlock_wrlock(self.inner.as_ptr()) };
 
         match result {
             ffrt_error_t_ffrt_success => Ok(RwLockWriteGuard { lock: self }),
@@ -61,7 +61,7 @@ impl<T> RwLock<T> {
     }
 
     pub fn try_read(&self) -> Result<RwLockReadGuard<'_, T>, LockError> {
-        let result = unsafe { ffrt_rwlock_tryrdlock(&self.inner as *const _ as *mut _) };
+        let result = unsafe { ffrt_rwlock_tryrdlock(self.inner.as_ptr()) };
 
         match result {
             ffrt_error_t_ffrt_success => Ok(RwLockReadGuard { lock: self }),
@@ -73,7 +73,7 @@ impl<T> RwLock<T> {
     }
 
     pub fn try_write(&self) -> Result<RwLockWriteGuard<'_, T>, LockError> {
-        let result = unsafe { ffrt_rwlock_trywrlock(&self.inner as *const _ as *mut _) };
+        let result = unsafe { ffrt_rwlock_trywrlock(self.inner.as_ptr()) };
 
         match result {
             ffrt_error_t_ffrt_success => Ok(RwLockWriteGuard { lock: self }),
@@ -108,7 +108,7 @@ impl<T> Deref for RwLockReadGuard<'_, T> {
 impl<T> Drop for RwLockReadGuard<'_, T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_rwlock_unlock(&self.lock.inner as *const _ as *mut _);
+            ffrt_rwlock_unlock(self.lock.inner.as_ptr());
         }
     }
 }
@@ -134,7 +134,7 @@ impl<T> DerefMut for RwLockWriteGuard<'_, T> {
 impl<T> Drop for RwLockWriteGuard<'_, T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_rwlock_unlock(&self.lock.inner as *const _ as *mut _);
+            ffrt_rwlock_unlock(self.lock.inner.as_ptr());
         }
     }
 }

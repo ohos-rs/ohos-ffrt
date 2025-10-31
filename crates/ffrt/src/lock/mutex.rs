@@ -38,7 +38,7 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Result<MutexGuard<'_, T>, LockError> {
-        let result = unsafe { ffrt_mutex_lock(&self.inner as *const _ as *mut _) };
+        let result = unsafe { ffrt_mutex_lock(self.inner.as_ptr()) };
 
         match result {
             ffrt_error_t_ffrt_success => Ok(MutexGuard { mutex: self }),
@@ -50,7 +50,7 @@ impl<T> Mutex<T> {
     }
 
     pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, LockError> {
-        let result = unsafe { ffrt_mutex_trylock(&self.inner as *const _ as *mut _) };
+        let result = unsafe { ffrt_mutex_trylock(self.inner.as_ptr()) };
 
         match result {
             ffrt_error_t_ffrt_success => Ok(MutexGuard { mutex: self }),
@@ -91,7 +91,7 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_mutex_unlock(&self.mutex.inner as *const _ as *mut _);
+            ffrt_mutex_unlock(self.mutex.inner.as_ptr());
         }
     }
 }

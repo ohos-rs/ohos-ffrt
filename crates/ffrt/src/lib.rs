@@ -1,4 +1,6 @@
-//! 同步原语
+//! OHOS FFRT Runtime
+//!
+//! 基于 FFRT (Function Flow Runtime) 的异步运行时实现
 
 pub mod channel;
 pub mod error;
@@ -11,10 +13,15 @@ pub mod utils;
 pub use channel::{Receiver, Sender, channel};
 pub use error::*;
 pub use lock::*;
-pub use runtime::{JoinHandle, Result, Runtime, sleep, wait_all, yield_now};
+pub use runtime::{JoinHandle, Result, Runtime, wait_all, yield_now};
 pub use task::*;
-pub use timer::*;
 pub use utils::*;
+
+// 重新导出异步 sleep 为主要的 sleep
+pub use runtime::sleep;
+
+// 同步 sleep 从 timer 模块单独导入
+pub use timer::sleep as blocking_sleep;
 
 /// 在默认运行时上执行future
 pub fn block_on<F>(future: F) -> Result<F::Output>
