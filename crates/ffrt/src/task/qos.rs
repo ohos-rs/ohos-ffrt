@@ -33,6 +33,7 @@ impl From<ffrt_qos_default_t> for Qos {
             ffrt_qos_default_t_ffrt_qos_utility => Qos::Utility,
             ffrt_qos_default_t_ffrt_qos_default => Qos::Default,
             ffrt_qos_default_t_ffrt_qos_user_initiated => Qos::UserInitiated,
+            _ => unreachable!(),
         }
     }
 }

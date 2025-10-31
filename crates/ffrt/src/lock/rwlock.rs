@@ -1,9 +1,12 @@
 use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
+use std::ptr::{self, NonNull};
+
+use crate::LockError;
 
 pub struct RwLock<T> {
-    inner: ffrt_rwlock_t,
+    inner: NonNull<ffrt_rwlock_t>,
     data: UnsafeCell<T>,
 }
 
@@ -12,8 +15,11 @@ unsafe impl<T: Send + Sync> Sync for RwLock<T> {}
 
 impl<T> RwLock<T> {
     pub fn new(value: T) -> Self {
-        let mut inner: *mut ffrt_rwlock_t = ptr::null_mut();
-        let result = unsafe { ffrt_rwlock_init(&mut inner, ptr::null()) };
+        use std::mem::MaybeUninit;
+
+        let mut uninit = Box::new(MaybeUninit::<ffrt_rwlock_t>::uninit());
+
+        let result = unsafe { ffrt_rwlock_init(uninit.as_mut_ptr(), ptr::null()) };
 
         #[cfg(debug_assertions)]
         assert!(
@@ -21,8 +27,11 @@ impl<T> RwLock<T> {
             "Failed to initialize rwlock"
         );
 
+        let inner = unsafe { uninit.assume_init() };
+        let ptr = Box::into_raw(inner);
+
         Self {
-            inner,
+            inner: unsafe { NonNull::new_unchecked(ptr) },
             data: UnsafeCell::new(value),
         }
     }
@@ -79,7 +88,7 @@ impl<T> RwLock<T> {
 impl<T> Drop for RwLock<T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_rwlock_destroy(&mut self.inner);
+            ffrt_rwlock_destroy(self.inner.as_ptr());
         }
     }
 }

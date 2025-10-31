@@ -1,5 +1,5 @@
 use crate::error::RuntimeError;
-use crate::mutex::Mutex;
+use crate::lock::Mutex;
 use ohos_ffrt_sys::*;
 use std::future::Future;
 use std::pin::Pin;

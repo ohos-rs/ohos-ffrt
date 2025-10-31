@@ -1,12 +1,12 @@
 use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
-use std::ptr;
+use std::ptr::{self, NonNull};
 
 use crate::lock::LockError;
 
 pub struct Mutex<T> {
-    inner: ffrt_mutex_t,
+    inner: NonNull<ffrt_mutex_t>,
     data: UnsafeCell<T>,
 }
 
@@ -16,8 +16,11 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 impl<T> Mutex<T> {
     /// 创建新的互斥锁
     pub fn new(value: T) -> Self {
-        let mut inner: *mut ffrt_mutex_t = ptr::null_mut();
-        let result = unsafe { ffrt_mutex_init(&mut inner, ptr::null()) };
+        use std::mem::MaybeUninit;
+
+        let mut uninit = Box::new(MaybeUninit::<ffrt_mutex_t>::uninit());
+
+        let result = unsafe { ffrt_mutex_init(uninit.as_mut_ptr(), ptr::null()) };
 
         #[cfg(debug_assertions)]
         assert!(
@@ -25,8 +28,11 @@ impl<T> Mutex<T> {
             "Failed to initialize mutex"
         );
 
+        let inner = unsafe { uninit.assume_init() };
+        let ptr = Box::into_raw(inner);
+
         Self {
-            inner,
+            inner: unsafe { NonNull::new_unchecked(ptr) },
             data: UnsafeCell::new(value),
         }
     }
@@ -59,7 +65,7 @@ impl<T> Mutex<T> {
 impl<T> Drop for Mutex<T> {
     fn drop(&mut self) {
         unsafe {
-            ffrt_mutex_destroy(&mut self.inner);
+            ffrt_mutex_destroy(self.inner.as_ptr());
         }
     }
 }

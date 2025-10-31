@@ -18,6 +18,5 @@ napi-ohos = { path = "../ohos-rs/crates/napi" }
 napi-derive-ohos = { path = "../ohos-rs/crates/macro" }
 napi-build-ohos = { path = "../ohos-rs/crates/build" }
 
-
-[lints.clippy]
+[workspace.lints.clippy]
 non_upper_case_globals = "allow"
