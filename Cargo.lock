@@ -207,6 +207,7 @@ dependencies = [
  "napi-sys-ohos",
  "nohash-hasher",
  "rustc-hash",
+ "tokio",
 ]
 
 [[package]]
@@ -318,6 +319,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
+name = "simple-ffrt"
+version = "0.1.0"
+dependencies = [
+ "napi-build-ohos",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "ohos-ffrt",
+ "ohos-hilog-binding",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -332,6 +344,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tokio"
+version = "1.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
+dependencies = [
+ "pin-project-lite",
 ]
 
 [[package]]

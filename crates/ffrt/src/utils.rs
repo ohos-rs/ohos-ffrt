@@ -4,8 +4,8 @@ use std::future::Future;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use super::error::RuntimeError;
 use super::runtime::Result;
-use super::runtime::RuntimeError;
 
 /// 为future添加超时
 pub async fn timeout<F: Future>(duration: Duration, _future: F) -> Result<F::Output> {
