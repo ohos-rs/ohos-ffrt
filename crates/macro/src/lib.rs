@@ -122,16 +122,17 @@ fn is_napi_ohos_path(path: &syn::Path) -> bool {
     // Accept the following patterns:
     // - napi_ohos::Result
     // - Result (if imported from napi_ohos)
-    
+
     let path_str = path
         .segments
         .iter()
         .map(|s| s.ident.to_string())
         .collect::<Vec<_>>()
         .join("::");
-    
+
     // Check if it's explicitly napi_ohos::Result or just Result (assumed to be imported)
-    path_str == "napi_ohos::Result" || (path.segments.len() == 1 && path.segments[0].ident == "Result")
+    path_str == "napi_ohos::Result"
+        || (path.segments.len() == 1 && path.segments[0].ident == "Result")
 }
 
 fn extract_result_inner_type(ty: &Type) -> Option<Type> {

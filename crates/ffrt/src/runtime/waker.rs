@@ -19,7 +19,7 @@ pub struct WakerState {
 }
 
 impl WakerState {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         use std::mem::MaybeUninit;
 
         let mut uninit_mutex = Box::new(MaybeUninit::<ffrt_mutex_t>::uninit());
@@ -40,7 +40,7 @@ impl WakerState {
         }
     }
 
-    pub(crate) fn wake(&self) {
+    pub fn wake(&self) {
         unsafe {
             ffrt_mutex_lock(self.mutex.as_ptr());
             *self.woken.get() = true;
@@ -49,7 +49,7 @@ impl WakerState {
         }
     }
 
-    pub(crate) fn is_woken(&self) -> bool {
+    pub fn is_woken(&self) -> bool {
         unsafe {
             ffrt_mutex_lock(self.mutex.as_ptr());
             let woken = *self.woken.get();
@@ -58,7 +58,7 @@ impl WakerState {
         }
     }
 
-    pub(crate) fn reset_woken(&self) {
+    pub fn reset_woken(&self) {
         unsafe {
             ffrt_mutex_lock(self.mutex.as_ptr());
             *self.woken.get() = false;
@@ -66,7 +66,7 @@ impl WakerState {
         }
     }
 
-    pub(crate) fn wait_timeout(&self, duration: std::time::Duration) {
+    pub fn wait_timeout(&self, duration: std::time::Duration) {
         unsafe {
             ffrt_mutex_lock(self.mutex.as_ptr());
 
@@ -74,7 +74,7 @@ impl WakerState {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("SystemTime before UNIX EPOCH");
-            
+
             let timeout = now + duration;
             let timeout_secs = timeout.as_secs() as _;
             let timeout_nsecs = timeout.subsec_nanos() as _;
