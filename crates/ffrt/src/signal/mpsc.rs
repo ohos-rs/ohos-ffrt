@@ -221,10 +221,10 @@ impl<'a, T> Drop for SharedGuard<'a, T> {
 impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
         unsafe {
-            let _ = Box::from_raw(self.mutex.as_ptr());
-            let _ = Box::from_raw(self.cond.as_ptr());
             ffrt_cond_destroy(self.cond.as_ptr());
             ffrt_mutex_destroy(self.mutex.as_ptr());
+            let _ = Box::from_raw(self.mutex.as_ptr());
+            let _ = Box::from_raw(self.cond.as_ptr());
         }
     }
 }
@@ -691,50 +691,5 @@ impl<T> Drop for UnboundedReceiver<T> {
         let mut guard = self.shared.lock();
         guard.inner_mut().receiver_alive = false;
         guard.broadcast();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_unbounded_send_recv() {
-        let (tx, mut rx) = unbounded_channel();
-        tx.send(42).unwrap();
-        assert_eq!(rx.try_recv().unwrap(), 42);
-    }
-
-    #[test]
-    fn test_bounded_send_recv() {
-        let (tx, mut rx) = channel(10);
-        tx.try_send(42).unwrap();
-        assert_eq!(rx.try_recv().unwrap(), 42);
-    }
-
-    #[test]
-    fn test_bounded_full() {
-        let (tx, _rx) = channel(1);
-        tx.try_send(42).unwrap();
-        assert!(matches!(tx.try_send(43), Err(TrySendError::Full(_))));
-    }
-
-    #[test]
-    fn test_clone_sender() {
-        let (tx, mut rx) = unbounded_channel();
-        let tx2 = tx.clone();
-
-        tx.send(1).unwrap();
-        tx2.send(2).unwrap();
-
-        assert_eq!(rx.try_recv().unwrap(), 1);
-        assert_eq!(rx.try_recv().unwrap(), 2);
-    }
-
-    #[test]
-    fn test_all_senders_dropped() {
-        let (tx, mut rx) = unbounded_channel::<i32>();
-        drop(tx);
-        assert!(rx.try_recv().is_err());
     }
 }

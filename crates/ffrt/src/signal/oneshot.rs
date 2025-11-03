@@ -144,10 +144,10 @@ impl<'a, T> Drop for SharedGuard<'a, T> {
 impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
         unsafe {
-            let _ = Box::from_raw(self.mutex.as_ptr());
-            let _ = Box::from_raw(self.cond.as_ptr());
             ffrt_cond_destroy(self.cond.as_ptr());
             ffrt_mutex_destroy(self.mutex.as_ptr());
+            let _ = Box::from_raw(self.mutex.as_ptr());
+            let _ = Box::from_raw(self.cond.as_ptr());
         }
     }
 }

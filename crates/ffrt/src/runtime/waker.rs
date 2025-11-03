@@ -7,8 +7,8 @@ use std::{
 
 use ohos_ffrt_sys::{
     ffrt_cond_destroy, ffrt_cond_init, ffrt_cond_signal, ffrt_cond_t, ffrt_cond_timedwait,
-    ffrt_mutex_destroy, ffrt_mutex_init, ffrt_mutex_lock, ffrt_mutex_t, ffrt_mutex_unlock,
-    timespec,
+    ffrt_cond_wait, ffrt_mutex_destroy, ffrt_mutex_init, ffrt_mutex_lock, ffrt_mutex_t,
+    ffrt_mutex_unlock, timespec,
 };
 
 /// Waker 状态，使用 FFRT 同步原语
@@ -90,6 +90,14 @@ impl WakerState {
                 &ts as *const timespec,
             );
 
+            ffrt_mutex_unlock(self.mutex.as_ptr());
+        }
+    }
+
+    pub fn wait(&self) {
+        unsafe {
+            ffrt_mutex_lock(self.mutex.as_ptr());
+            ffrt_cond_wait(self.cond.as_ptr(), self.mutex.as_ptr());
             ffrt_mutex_unlock(self.mutex.as_ptr());
         }
     }

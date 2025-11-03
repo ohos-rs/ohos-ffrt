@@ -89,20 +89,11 @@ fn poll_once<F: Future>(mut future: F) -> F::Output {
     let mut cx = Context::from_waker(&waker);
 
     loop {
-        // 重置唤醒标志
-        waker_state.reset_woken();
-
         if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
             return output;
         }
 
-        // 如果已经被唤醒，立即继续
-        if waker_state.is_woken() {
-            continue;
-        }
-
-        // 等待唤醒或超时
-        waker_state.wait_timeout(std::time::Duration::from_millis(10));
+        waker_state.wait();
     }
 }
 
