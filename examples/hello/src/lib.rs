@@ -17,3 +17,44 @@ pub fn example_a<'env>(
         Ok(())
     })
 }
+
+#[napi]
+pub fn example_b<'env>(env: &'env Env, hello: String) -> napi_ohos::Result<PromiseRaw<'env, ()>> {
+    env.spawn_local(async move {
+        ohos_hilog_binding::hilog_info!("Hello, {}!", hello);
+        Ok(())
+    })
+}
+
+#[ffrt]
+pub async fn example_c(hello: String) -> () {
+    ohos_hilog_binding::hilog_info!("Hello, {}!", hello);
+}
+
+#[ffrt]
+pub async fn example_d(hello: String) -> napi_ohos::Result<()> {
+    ohos_hilog_binding::hilog_info!("Hello, {}!", hello);
+    Ok(())
+}
+
+#[ffrt]
+pub async fn example_e() -> napi_ohos::Result<String> {
+    Ok("Hello, World!".to_string())
+}
+
+#[ffrt]
+pub async fn example_f() -> String {
+    String::from("hello")
+}
+
+// Test case: This should compile fine with napi_ohos::Result
+#[ffrt]
+pub async fn example_g(value: u32) -> napi_ohos::Result<u32> {
+    Ok(value * 2)
+}
+
+// Test case: Empty function returning ()
+#[ffrt]
+pub async fn example_h() {
+    ohos_hilog_binding::hilog_info!("Example H called");
+}

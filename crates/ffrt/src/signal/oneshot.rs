@@ -339,8 +339,6 @@ impl<T> Receiver<T> {
     }
 
     /// 关闭接收端
-    /// 
-    /// 这会导致发送端的 is_closed() 返回 true
     pub fn close(&mut self) {
         if let Some(shared) = &self.shared {
             let mut guard = shared.lock();
