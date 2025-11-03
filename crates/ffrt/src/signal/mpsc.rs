@@ -299,7 +299,10 @@ impl<T> Sender<T> {
                 }
             }
 
-            guard.inner_mut().queue.push_back(current_value.take().unwrap());
+            guard
+                .inner_mut()
+                .queue
+                .push_back(current_value.take().unwrap());
 
             // 唤醒等待的接收者
             if let Some(waker) = guard.inner_mut().recv_waker.take() {
@@ -390,7 +393,10 @@ impl<T> Future for SendFuture<T> {
         }
 
         // 有空间，发送消息
-        guard.inner_mut().queue.push_back(this.value.take().unwrap());
+        guard
+            .inner_mut()
+            .queue
+            .push_back(this.value.take().unwrap());
 
         // 唤醒等待的接收者
         if let Some(waker) = guard.inner_mut().recv_waker.take() {
@@ -732,4 +738,3 @@ mod tests {
         assert!(rx.try_recv().is_err());
     }
 }
-

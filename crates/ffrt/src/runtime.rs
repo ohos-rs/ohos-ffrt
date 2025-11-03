@@ -146,9 +146,7 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.rx).poll(cx) {
             Poll::Ready(Ok(value)) => Poll::Ready(Ok(value)),
-            Poll::Ready(Err(_)) => {
-                Poll::Ready(Err(RuntimeError::Other("Task failed".to_string())))
-            }
+            Poll::Ready(Err(_)) => Poll::Ready(Err(RuntimeError::Other("Task failed".to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }

@@ -1,5 +1,8 @@
+#![allow(warnings)]
+
 use ohos_ffrt_sys::{
-    ffrt_mutex_type, ffrt_mutex_type_ffrt_mutex_normal, ffrt_mutex_type_ffrt_mutex_recursive,
+    ffrt_mutex_type, ffrt_mutex_type_ffrt_mutex_default, ffrt_mutex_type_ffrt_mutex_normal,
+    ffrt_mutex_type_ffrt_mutex_recursive,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -13,6 +16,7 @@ impl From<ffrt_mutex_type> for LockMode {
         match value {
             ffrt_mutex_type_ffrt_mutex_normal => LockMode::Normal,
             ffrt_mutex_type_ffrt_mutex_recursive => LockMode::Recursive,
+            ffrt_mutex_type_ffrt_mutex_default => LockMode::Normal,
             _ => panic!("Invalid mutex type: {}", value),
         }
     }

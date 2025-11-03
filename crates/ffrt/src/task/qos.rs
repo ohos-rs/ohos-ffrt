@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 use ohos_ffrt_sys::{
     ffrt_qos_default_t, ffrt_qos_default_t_ffrt_qos_background,
     ffrt_qos_default_t_ffrt_qos_default, ffrt_qos_default_t_ffrt_qos_inherit,

@@ -1,101 +1,150 @@
 use proc_macro::TokenStream;
-use quote::ToTokens;
-use quote::TokenStreamExt;
 use quote::quote;
-use syn::Ident;
-use syn::ItemFn;
-use syn::ReturnType;
+use syn::{ItemFn, ReturnType, Type, parse_quote};
 
 #[proc_macro_attribute]
-pub fn napi_async(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn ffrt(_args: TokenStream, input: TokenStream) -> TokenStream {
     convert(input.into())
         .unwrap_or_else(|err| err.into_compile_error())
         .into()
 }
 
 fn convert(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, syn::Error> {
-    let mut func = syn::parse2::<ItemFn>(input)?;
+    let func = syn::parse2::<ItemFn>(input)?;
 
     if func.sig.asyncness.is_none() {
-        return Err(syn::Error::new_spanned(func, "Failed to do the thing"));
+        return Err(syn::Error::new_spanned(
+            func,
+            "ffrt macro only supports async functions",
+        ));
     }
 
-    let raw_inputs = &func.sig.inputs;
-    let mut input_names = proc_macro2::TokenStream::new();
-    let mut pre_body = proc_macro2::TokenStream::new();
+    // Extract function metadata
+    let func_name = &func.sig.ident;
+    let func_vis = &func.vis;
+    let func_attrs = &func.attrs;
+    let func_inputs = &func.sig.inputs;
+    let func_body = &func.block;
+    let func_output = &func.sig.output;
 
-    let mut insert_env = proc_macro2::TokenStream::new();
-    let mut has_env = false;
+    // Collect parameter names for the async block
+    let mut param_names = Vec::new();
+    for input in func_inputs.iter() {
+        if let syn::FnArg::Typed(pat_type) = input {
+            param_names.push(&pat_type.pat);
+        }
+    }
 
-    for input in raw_inputs.iter() {
-        match &input {
-            syn::FnArg::Receiver(_r) => continue,
-            syn::FnArg::Typed(t) => {
-                let pat = &*t.pat;
-                if let syn::Type::Path(p) = &*t.ty {
-                    if let Some(segment) = p.path.segments.last() {
-                        if segment.ident == "Env" {
-                            has_env = true;
-                        } else if segment.ident == "JsString"
-                            || segment.ident == "JsUnknown"
-                            || segment.ident == "JsUndefined"
-                            || segment.ident == "JsNull"
-                            || segment.ident == "JsBoolean"
-                            || segment.ident == "JsBuffer"
-                            || segment.ident == "JsArrayBuffer"
-                            || segment.ident == "JsTypedArray"
-                            || segment.ident == "JsDataView"
-                            || segment.ident == "JsNumber"
-                            || segment.ident == "JsString"
-                            || segment.ident == "JsObject"
-                            || segment.ident == "JsGlobal"
-                            || segment.ident == "JsDate"
-                            || segment.ident == "JsFunction"
-                            || segment.ident == "JsExternal"
-                            || segment.ident == "JsSymbol"
-                            || segment.ident == "JsTimeout"
-                            || segment.ident == "JSON"
-                        {
-                            pre_body.append_all(
-                quote! {let #pat = #pat.into_rc(&env).unwrap().into_inner(&env).unwrap();
-                },
-              );
-                        };
-                    }
+    // Check for incorrect Result usage
+    if let ReturnType::Type(_, ty) = func_output {
+        if let Type::Path(type_path) = &**ty {
+            if let Some(segment) = type_path.path.segments.last() {
+                if segment.ident == "Result" && !is_napi_ohos_path(&type_path.path) {
+                    return Err(syn::Error::new_spanned(
+                        ty,
+                        "ffrt macro requires napi_ohos::Result, not std::result::Result or other Result types",
+                    ));
                 }
-                input_names.append_all(pat.to_token_stream());
-                input_names.append_all(quote! {,});
             }
         }
     }
 
-    if !has_env {
-        insert_env = quote! {env: Env,}
-    }
-
-    if let ReturnType::Default = func.sig.output {
-        let new_output = syn::parse2::<ItemFn>(quote! {fn x() -> () { () }})?;
-        func.sig.output = new_output.sig.output;
-    }
-
-    let ident = func.sig.ident.clone();
-    func.sig.ident = Ident::new(&format!("async_local_{}", ident), ident.span());
-    let new_ident = &func.sig.ident;
-
-    let ret = match &func.sig.output {
-        syn::ReturnType::Default => quote! {napi::Result<napi::JsUndefined>},
-        syn::ReturnType::Type(_, v) => quote!(#v),
+    // Determine the inner return type (what the async function returns)
+    let inner_return_type = match func_output {
+        ReturnType::Default => {
+            // If no return type, default to ()
+            parse_quote!(())
+        }
+        ReturnType::Type(_, ty) => {
+            // Check if it's already a Result type
+            if is_result_type(ty) {
+                // Extract T from Result<T>
+                extract_result_inner_type(ty).unwrap_or_else(|| parse_quote!(()))
+            } else {
+                // Not a Result, use as-is
+                (**ty).clone()
+            }
+        }
     };
 
+    // Determine if original function returns Result
+    let returns_result = match func_output {
+        ReturnType::Default => false,
+        ReturnType::Type(_, ty) => is_result_type(ty),
+    };
+
+    // Build the async block body
+    let async_body = if returns_result {
+        // Already returns Result, use as-is
+        quote! {
+            #func_body
+        }
+    } else {
+        // Wrap the entire function body result in Ok()
+        // For fn() -> T, this becomes Ok({ body })
+        // For fn() -> (), this becomes Ok({ body })
+        quote! {
+            {
+                Ok(#func_body)
+            }
+        }
+    };
+
+    // Generate the wrapper function
     Ok(quote! {
-      #func
+        #(#func_attrs)*
+        #[napi_derive_ohos::napi]
+        #func_vis fn #func_name<'env>(
+            env: &'env napi_ohos::Env,
+            #func_inputs
+        ) -> napi_ohos::Result<napi_ohos::bindgen_prelude::PromiseRaw<'env, #inner_return_type>> {
+            use ohos_ext::SpawnLocalExt;
 
-      #[napi_derive::napi]
-      fn #ident(#insert_env #raw_inputs) -> napi::Result<JsObject> {
-        #pre_body
-
-        let fut = #new_ident(#input_names);
-        env.spawn_local_promise(fut)
-      }
+            env.spawn_local(async move #async_body)
+        }
     })
+}
+
+fn is_result_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        // Check if the last segment is "Result"
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Result" {
+                // Check if it's from napi_ohos
+                return is_napi_ohos_path(&type_path.path);
+            }
+        }
+    }
+    false
+}
+
+fn is_napi_ohos_path(path: &syn::Path) -> bool {
+    // Accept the following patterns:
+    // - napi_ohos::Result
+    // - Result (if imported from napi_ohos)
+    
+    let path_str = path
+        .segments
+        .iter()
+        .map(|s| s.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::");
+    
+    // Check if it's explicitly napi_ohos::Result or just Result (assumed to be imported)
+    path_str == "napi_ohos::Result" || (path.segments.len() == 1 && path.segments[0].ident == "Result")
+}
+
+fn extract_result_inner_type(ty: &Type) -> Option<Type> {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Result" && is_napi_ohos_path(&type_path.path) {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(inner_ty.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
 }

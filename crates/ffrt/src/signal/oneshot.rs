@@ -33,20 +33,20 @@ impl<T: std::fmt::Debug> std::error::Error for SendError<T> {}
 /// 创建一个新的 oneshot channel
 ///
 /// 返回一个 (Sender, Receiver) 对，只能发送一个值
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```no_run
 /// use ohos_ffrt::signal::oneshot;
-/// 
+///
 /// let (tx, rx) = oneshot::channel();
-/// 
+///
 /// ohos_ffrt::spawn(async move {
 ///     if let Err(_) = tx.send(42) {
 ///         println!("Receiver dropped");
 ///     }
 /// });
-/// 
+///
 /// match rx.await {
 ///     Ok(value) => println!("Got: {}", value),
 ///     Err(_) => println!("Sender dropped"),
@@ -156,7 +156,7 @@ unsafe impl<T: Send> Send for Shared<T> {}
 unsafe impl<T: Send> Sync for Shared<T> {}
 
 /// oneshot channel 的发送端
-/// 
+///
 /// 通过此类型发送单个值到对应的 Receiver
 pub struct Sender<T> {
     shared: Option<Arc<Shared<T>>>,
@@ -164,16 +164,16 @@ pub struct Sender<T> {
 
 impl<T> Sender<T> {
     /// 发送值到 channel
-    /// 
+    ///
     /// 如果接收端已经被丢弃，则返回错误
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use ohos_ffrt::signal::oneshot;
-    /// 
+    ///
     /// let (tx, rx) = oneshot::channel();
-    /// 
+    ///
     /// tx.send(42).unwrap();
     /// ```
     pub fn send(mut self, value: T) -> Result<(), SendError<T>> {
@@ -255,7 +255,7 @@ impl<T> Future for ClosedFuture<T> {
 }
 
 /// oneshot channel 的接收端
-/// 
+///
 /// 通过 await 或 blocking_recv 接收单个值
 pub struct Receiver<T> {
     shared: Option<Arc<Shared<T>>>,
@@ -263,21 +263,21 @@ pub struct Receiver<T> {
 
 impl<T> Receiver<T> {
     /// 尝试非阻塞地接收值
-    /// 
+    ///
     /// 如果值还没准备好或发送端已关闭，返回错误
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use ohos_ffrt::signal::oneshot;
-    /// 
+    ///
     /// let (tx, mut rx) = oneshot::channel();
-    /// 
+    ///
     /// // 没有值可接收
     /// assert!(rx.try_recv().is_err());
-    /// 
+    ///
     /// tx.send(42).unwrap();
-    /// 
+    ///
     /// // 现在可以接收了
     /// assert_eq!(rx.try_recv().unwrap(), 42);
     /// ```
@@ -298,21 +298,21 @@ impl<T> Receiver<T> {
     }
 
     /// 阻塞式接收值
-    /// 
+    ///
     /// 会阻塞当前线程直到接收到值或发送端关闭
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use ohos_ffrt::signal::oneshot;
     /// use std::thread;
-    /// 
+    ///
     /// let (tx, rx) = oneshot::channel();
-    /// 
+    ///
     /// thread::spawn(move || {
     ///     tx.send(42).unwrap();
     /// });
-    /// 
+    ///
     /// assert_eq!(rx.blocking_recv().unwrap(), 42);
     /// ```
     pub fn blocking_recv(mut self) -> Result<T, RecvError> {
@@ -339,7 +339,7 @@ impl<T> Receiver<T> {
     }
 
     /// 关闭接收端
-    /// 
+    ///
     /// 这会导致发送端的 is_closed() 返回 true
     pub fn close(&mut self) {
         if let Some(shared) = &self.shared {
@@ -412,4 +412,3 @@ mod tests {
         assert!(tx.send(42).is_err());
     }
 }
-

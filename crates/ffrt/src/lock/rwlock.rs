@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 use ohos_ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
