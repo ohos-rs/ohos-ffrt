@@ -1,11 +1,12 @@
-use crate::error::RuntimeError;
+use super::WakerState;
 use crate::signal::oneshot;
+use crate::{RuntimeError, create_waker};
 use crate::{Task, TaskAttr};
 use ohos_ffrt_sys::*;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::OnceLock;
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::sync::{Arc, OnceLock};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
@@ -81,41 +82,28 @@ impl Runtime {
 /// 在当前线程持续 poll future 直到完成
 fn poll_once<F: Future>(mut future: F) -> F::Output {
     let mut future = unsafe { Pin::new_unchecked(&mut future) };
-    let waker = noop_waker();
+
+    // 创建一个基于 FFRT 条件变量的 waker
+    let waker_state = Arc::new(WakerState::new());
+    let waker = create_waker(waker_state.clone());
     let mut cx = Context::from_waker(&waker);
 
     loop {
+        // 重置唤醒标志
+        waker_state.reset_woken();
+
         if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
             return output;
         }
 
-        // 短暂让出执行权，避免忙等待
-        unsafe {
-            ffrt_yield();
+        // 如果已经被唤醒，立即继续
+        if waker_state.is_woken() {
+            continue;
         }
+
+        // 等待唤醒或超时
+        waker_state.wait_timeout(std::time::Duration::from_millis(10));
     }
-}
-
-/// 创建一个空的 waker
-fn noop_waker() -> Waker {
-    unsafe fn noop_clone(_: *const ()) -> RawWaker {
-        noop_raw_waker()
-    }
-
-    unsafe fn noop_wake(_: *const ()) {}
-
-    unsafe fn noop_wake_by_ref(_: *const ()) {}
-
-    unsafe fn noop_drop(_: *const ()) {}
-
-    fn noop_raw_waker() -> RawWaker {
-        RawWaker::new(
-            std::ptr::null(),
-            &RawWakerVTable::new(noop_clone, noop_wake, noop_wake_by_ref, noop_drop),
-        )
-    }
-
-    unsafe { Waker::from_raw(noop_raw_waker()) }
 }
 
 /// 任务的 JoinHandle
@@ -146,9 +134,7 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.rx).poll(cx) {
             Poll::Ready(Ok(value)) => Poll::Ready(Ok(value)),
-            Poll::Ready(Err(_)) => {
-                Poll::Ready(Err(RuntimeError::Other("Task failed".to_string())))
-            }
+            Poll::Ready(Err(_)) => Poll::Ready(Err(RuntimeError::Other("Task failed".to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
