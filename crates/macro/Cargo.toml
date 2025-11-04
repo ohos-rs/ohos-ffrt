@@ -2,11 +2,13 @@
 name = "ohos-ext-macro"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "ohos ffrt macro for ohos-rs"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["full"]}
+syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"

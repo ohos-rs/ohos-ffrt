@@ -232,7 +232,6 @@ dependencies = [
  "ohos-ext-macro",
  "ohos-ffrt",
  "ohos-ffrt-sys",
- "once_cell",
 ]
 
 [[package]]
@@ -269,12 +268,6 @@ name = "ohos-hilogs-sys"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed07615005d0f8d7bcf901f89c8ff4870666a9bdb00382f588af383f40c160b7"
-
-[[package]]
-name = "once_cell"
-version = "1.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "pin-project-lite"
