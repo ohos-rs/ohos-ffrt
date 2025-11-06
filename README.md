@@ -1,6 +1,10 @@
 # ohos-ffrt
 
+![Crates.io Version](https://img.shields.io/crates/v/ohos-ffrt) ![Platform](https://img.shields.io/badge/platform-arm64/arm/x86__64-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 This project provide a ffrt-binding and napi-ext for ffrt.
+
+**Note: Don't use it to replace `tokio` directly, it only works for some simple scenarios now.**
 
 ## Install
 
@@ -66,7 +70,7 @@ pub async fn example_e() -> napi_ohos::Result<String> {
 
 ## What is FFRT and Why we need it?
 
-You can see it as a builtin ThreadPool. See detail with [ffrt-kit](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ffrt-kit).
+You can see it as a built-in ThreadPool or async runtime. See detail with [ffrt-kit](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ffrt-kit).
 
 We typically rely on tokio as the runtime for asynchronous tasks, but it adds extra overhead in terms of package size and startup thread load. Switching to `ffrt` helps address these challenges.
 
