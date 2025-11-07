@@ -1,0 +1,34 @@
+# Action name
+name: Simple Test Action
+
+# Here, this action will be enabled on all pushes.
+# Modify this to fit your needs.
+on: push
+
+# Jobs section
+jobs:
+  simple-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OpenHarmony SDK
+        uses: openharmony-rs/setup-ohos-sdk@v0.1
+        id: setup-ohos
+        with:
+          version: "5.0.0"
+
+      - name: Setup Rust environment
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: "aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos"
+
+      - name: Install
+        run: cargo install ohrs
+
+      - name: Run basic
+        run: cd examples/hello && ohrs build
+
+      - name: Run example
+        run: cd examples/simple-ffrt && ohrs build
