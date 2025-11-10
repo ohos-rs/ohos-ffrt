@@ -35,13 +35,15 @@ impl Drop for TaskHandle {
     }
 }
 
+impl Default for Task {
+    fn default() -> Self {
+        Self::new(TaskAttr::new())
+    }
+}
+
 impl Task {
     pub fn new(attr: TaskAttr) -> Self {
         Self { attr, handle: None }
-    }
-
-    pub fn default() -> Self {
-        Self::new(TaskAttr::new())
     }
 
     pub fn submit<F>(&self, func: F)
