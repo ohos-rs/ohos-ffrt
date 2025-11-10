@@ -13,9 +13,6 @@ pub use runtime::*;
 pub use signal::*;
 pub use task::*;
 
-// 同步 sleep 从 timer 模块单独导入
-pub use timer::sleep as blocking_sleep;
-
 // 在默认运行时上执行future
 pub fn block_on<F>(future: F) -> Result<F::Output>
 where

@@ -1,3 +1,6 @@
+use std::time::Duration;
+use std::time::Instant;
+
 use napi_derive_ohos::napi;
 use napi_ohos::bindgen_prelude::FnArgs;
 use napi_ohos::bindgen_prelude::Function;
@@ -57,4 +60,11 @@ pub async fn example_g(value: u32) -> napi_ohos::Result<u32> {
 #[ffrt]
 pub async fn example_h() {
     ohos_hilog_binding::hilog_info!("Example H called");
+}
+
+#[ffrt]
+pub async fn sleep_example() {
+    ohos_hilog_binding::hilog_info!(format!("Start time: {:?}", Instant::now()));
+    ohos_ext::timer::r#async::sleep(Duration::from_secs(1)).await;
+    ohos_hilog_binding::hilog_info!(format!("End time: {:?}", Instant::now()));
 }
