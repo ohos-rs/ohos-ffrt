@@ -262,10 +262,10 @@ impl<T> Sender<T> {
         }
 
         let capacity = guard.inner().capacity;
-        if let Some(cap) = capacity {
-            if guard.inner().queue.len() >= cap {
-                return Err(TrySendError::Full(value));
-            }
+        if let Some(cap) = capacity
+            && guard.inner().queue.len() >= cap
+        {
+            return Err(TrySendError::Full(value));
         }
 
         guard.inner_mut().queue.push_back(value);
@@ -292,11 +292,11 @@ impl<T> Sender<T> {
             }
 
             let capacity = guard.inner().capacity;
-            if let Some(cap) = capacity {
-                if guard.inner().queue.len() >= cap {
-                    guard.wait();
-                    continue;
-                }
+            if let Some(cap) = capacity
+                && guard.inner().queue.len() >= cap
+            {
+                guard.wait();
+                continue;
             }
 
             guard
@@ -384,12 +384,12 @@ impl<T> Future for SendFuture<T> {
         }
 
         let capacity = guard.inner().capacity;
-        if let Some(cap) = capacity {
-            if guard.inner().queue.len() >= cap {
-                // 队列已满，保存 waker 并返回 Pending
-                guard.inner_mut().send_wakers.push_back(cx.waker().clone());
-                return Poll::Pending;
-            }
+        if let Some(cap) = capacity
+            && guard.inner().queue.len() >= cap
+        {
+            // 队列已满，保存 waker 并返回 Pending
+            guard.inner_mut().send_wakers.push_back(cx.waker().clone());
+            return Poll::Pending;
         }
 
         // 有空间，发送消息

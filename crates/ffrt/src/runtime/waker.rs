@@ -103,6 +103,12 @@ impl WakerState {
     }
 }
 
+impl Default for WakerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for WakerState {
     fn drop(&mut self) {
         unsafe {

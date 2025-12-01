@@ -36,17 +36,16 @@ fn convert(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, 
     }
 
     // Check for incorrect Result usage
-    if let ReturnType::Type(_, ty) = func_output {
-        if let Type::Path(type_path) = &**ty {
-            if let Some(segment) = type_path.path.segments.last() {
-                if segment.ident == "Result" && !is_napi_ohos_path(&type_path.path) {
-                    return Err(syn::Error::new_spanned(
-                        ty,
-                        "ffrt macro requires napi_ohos::Result, not std::result::Result or other Result types",
-                    ));
-                }
-            }
-        }
+    if let ReturnType::Type(_, ty) = func_output
+        && let Type::Path(type_path) = &**ty
+        && let Some(segment) = type_path.path.segments.last()
+        && segment.ident == "Result"
+        && !is_napi_ohos_path(&type_path.path)
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "ffrt macro requires napi_ohos::Result, not std::result::Result or other Result types",
+        ));
     }
 
     // Determine the inner return type (what the async function returns)
@@ -106,14 +105,11 @@ fn convert(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, 
 }
 
 fn is_result_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        // Check if the last segment is "Result"
-        if let Some(segment) = type_path.path.segments.last() {
-            if segment.ident == "Result" {
-                // Check if it's from napi_ohos
-                return is_napi_ohos_path(&type_path.path);
-            }
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && segment.ident == "Result"
+    {
+        return is_napi_ohos_path(&type_path.path);
     }
     false
 }
@@ -136,16 +132,14 @@ fn is_napi_ohos_path(path: &syn::Path) -> bool {
 }
 
 fn extract_result_inner_type(ty: &Type) -> Option<Type> {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            if segment.ident == "Result" && is_napi_ohos_path(&type_path.path) {
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                        return Some(inner_ty.clone());
-                    }
-                }
-            }
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && segment.ident == "Result"
+        && is_napi_ohos_path(&type_path.path)
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+    {
+        return Some(inner_ty.clone());
     }
     None
 }
