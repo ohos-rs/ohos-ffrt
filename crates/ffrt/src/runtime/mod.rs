@@ -1,7 +1,7 @@
 mod error;
-mod runtime;
+mod inner_runtime;
 mod waker;
 
 pub use error::*;
-pub use runtime::*;
+pub use inner_runtime::*;
 pub use waker::*;

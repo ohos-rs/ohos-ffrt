@@ -2,7 +2,7 @@ use napi_derive_ohos::napi;
 use ohos_ffrt::{Task, TaskAttr, TaskPriority};
 
 #[napi]
-pub fn run_ffrt() -> () {
+pub fn run_ffrt() {
     let task = Task::new(Default::default());
 
     task.submit(|| {
@@ -11,7 +11,7 @@ pub fn run_ffrt() -> () {
 }
 
 #[napi]
-pub fn run_ffrt_with_attr() -> () {
+pub fn run_ffrt_with_attr() {
     let attr = TaskAttr::new();
     attr.set_priority(TaskPriority::High);
 

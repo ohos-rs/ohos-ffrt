@@ -23,7 +23,7 @@ impl Runtime {
     }
 
     pub fn global() -> Self {
-        *RUNTIME.get_or_init(|| Self::new())
+        *RUNTIME.get_or_init(Self::new)
     }
 
     /// 阻塞当前线程，运行 future 直到完成

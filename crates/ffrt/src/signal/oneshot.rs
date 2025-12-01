@@ -287,8 +287,6 @@ impl<T> Receiver<T> {
 
             if let Some(value) = guard.inner_mut().value.take() {
                 Ok(value)
-            } else if !guard.inner().sender_alive {
-                Err(RecvError)
             } else {
                 Err(RecvError)
             }
