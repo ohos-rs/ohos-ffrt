@@ -7,3 +7,15 @@ description = "ohos ffrt runtime bindings"
 
 [dependencies]
 ohos-ffrt-sys = { workspace = true }
+
+
+[features]
+default = []
+api-13 = []
+api-14 = ["api-13", "ohos-ffrt-sys/api-14"]
+api-15 = ["api-14", "ohos-ffrt-sys/api-15"]
+api-16 = ["api-15", "ohos-ffrt-sys/api-16"]
+api-17 = ["api-16", "ohos-ffrt-sys/api-17"]
+api-18 = ["api-17", "ohos-ffrt-sys/api-18"]
+api-19 = ["api-18", "ohos-ffrt-sys/api-19"]
+api-20 = ["api-19", "ohos-ffrt-sys/api-20"]
