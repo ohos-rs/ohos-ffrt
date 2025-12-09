@@ -1,15 +1,100 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{ItemFn, ReturnType, Type, parse_quote};
+use syn::{
+    Ident, ItemFn, LitInt, LitStr, ReturnType, Token, Type, parse::Parse, parse::ParseStream,
+    parse_quote,
+};
+
+#[derive(Default)]
+struct MacroArgs {
+    qos: Option<String>,
+    priority: Option<String>,
+    name: Option<String>,
+    delay: Option<u64>,
+    stack_size: Option<u64>,
+}
+
+impl Parse for MacroArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut args = MacroArgs::default();
+
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+
+            let key_str = key.to_string();
+            match key_str.as_str() {
+                "qos" => {
+                    let value: LitStr = input.parse()?;
+                    if !value.value().eq_ignore_ascii_case("inherit")
+                        && !value.value().eq_ignore_ascii_case("background")
+                        && !value.value().eq_ignore_ascii_case("utility")
+                        && !value.value().eq_ignore_ascii_case("default")
+                        && !value.value().eq_ignore_ascii_case("userinitiated")
+                    {
+                        return Err(syn::Error::new_spanned(
+                            value,
+                            "qos value must be one of: Inherit, Background, Utility, Default, UserInitiated",
+                        ));
+                    }
+                    args.qos = Some(value.value());
+                }
+                "priority" => {
+                    let value: LitStr = input.parse()?;
+                    if !value.value().eq_ignore_ascii_case("immediate")
+                        && !value.value().eq_ignore_ascii_case("high")
+                        && !value.value().eq_ignore_ascii_case("low")
+                        && !value.value().eq_ignore_ascii_case("idle")
+                    {
+                        return Err(syn::Error::new_spanned(
+                            value,
+                            "priority value must be one of: Immediate, High, Low, Idle",
+                        ));
+                    }
+                    args.priority = Some(value.value());
+                }
+                "name" => {
+                    let value: LitStr = input.parse()?;
+                    args.name = Some(value.value());
+                }
+                "delay" => {
+                    let value: LitInt = input.parse()?;
+                    args.delay = Some(value.base10_parse()?);
+                }
+                "stack_size" => {
+                    let value: LitInt = input.parse()?;
+                    args.stack_size = Some(value.base10_parse()?);
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        key,
+                        format!("unknown attribute: {}", key_str),
+                    ));
+                }
+            }
+
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(args)
+    }
+}
 
 #[proc_macro_attribute]
-pub fn ffrt(_args: TokenStream, input: TokenStream) -> TokenStream {
-    convert(input.into())
+pub fn ffrt(args: TokenStream, input: TokenStream) -> TokenStream {
+    let macro_args = syn::parse_macro_input!(args as MacroArgs);
+
+    convert(macro_args, input.into())
         .unwrap_or_else(|err| err.into_compile_error())
         .into()
 }
 
-fn convert(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, syn::Error> {
+fn convert(
+    macro_args: MacroArgs,
+    input: proc_macro2::TokenStream,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
     let func = syn::parse2::<ItemFn>(input)?;
 
     if func.sig.asyncness.is_none() {
@@ -89,6 +174,24 @@ fn convert(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, 
         }
     };
 
+    // Build TaskAttr initialization code
+    let attr_setup = build_attr_setup(&macro_args)?;
+
+    // Determine which spawn method to use
+    let spawn_call = if macro_args.has_any_attr() {
+        quote! {
+            let attr = {
+                use ohos_ext::{TaskAttr, Qos, TaskPriority};
+                #attr_setup
+            };
+            env.spawn_local_with_attr(attr, async move #async_body)
+        }
+    } else {
+        quote! {
+            env.spawn_local(async move #async_body)
+        }
+    };
+
     // Generate the wrapper function
     Ok(quote! {
         #(#func_attrs)*
@@ -99,9 +202,97 @@ fn convert(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream, 
         ) -> napi_ohos::Result<napi_ohos::bindgen_prelude::PromiseRaw<'env, #inner_return_type>> {
             use ohos_ext::SpawnLocalExt;
 
-            env.spawn_local(async move #async_body)
+            #spawn_call
         }
     })
+}
+
+fn build_attr_setup(args: &MacroArgs) -> Result<proc_macro2::TokenStream, syn::Error> {
+    let mut setup_code = quote! {
+        let attr = TaskAttr::default();
+    };
+
+    // Set QoS if provided
+    if let Some(ref qos) = args.qos {
+        let qos_variant = match qos.as_str() {
+            "Inherit" => quote!(Qos::Inherit),
+            "Background" => quote!(Qos::Background),
+            "Utility" => quote!(Qos::Utility),
+            "Default" => quote!(Qos::Default),
+            "UserInitiated" => quote!(Qos::UserInitiated),
+            _ => {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!(
+                        "Invalid QoS value: {}. Valid values are: Inherit, Background, Utility, Default, UserInitiated",
+                        qos
+                    ),
+                ));
+            }
+        };
+        setup_code.extend(quote! {
+            attr.set_qos(#qos_variant);
+        });
+    }
+
+    // Set priority if provided
+    if let Some(ref priority) = args.priority {
+        let priority_variant = match priority.as_str() {
+            "Immediate" => quote!(TaskPriority::Immediate),
+            "High" => quote!(TaskPriority::High),
+            "Low" => quote!(TaskPriority::Low),
+            "Idle" => quote!(TaskPriority::Idle),
+            _ => {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!(
+                        "Invalid priority value: {}. Valid values are: Immediate, High, Low, Idle",
+                        priority
+                    ),
+                ));
+            }
+        };
+        setup_code.extend(quote! {
+            attr.set_priority(#priority_variant);
+        });
+    }
+
+    // Set name if provided
+    if let Some(ref name) = args.name {
+        setup_code.extend(quote! {
+            attr.set_name(#name);
+        });
+    }
+
+    // Set delay if provided
+    if let Some(delay) = args.delay {
+        setup_code.extend(quote! {
+            attr.set_delay(#delay);
+        });
+    }
+
+    // Set stack_size if provided
+    if let Some(stack_size) = args.stack_size {
+        setup_code.extend(quote! {
+            attr.set_stack_size(#stack_size);
+        });
+    }
+
+    setup_code.extend(quote! {
+        attr
+    });
+
+    Ok(setup_code)
+}
+
+impl MacroArgs {
+    fn has_any_attr(&self) -> bool {
+        self.qos.is_some()
+            || self.priority.is_some()
+            || self.name.is_some()
+            || self.delay.is_some()
+            || self.stack_size.is_some()
+    }
 }
 
 fn is_result_type(ty: &Type) -> bool {

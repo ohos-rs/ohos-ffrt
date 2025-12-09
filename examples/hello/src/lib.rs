@@ -68,3 +68,28 @@ pub async fn sleep_example() {
     ohos_ext::timer::r#async::sleep(Duration::from_secs(1)).await;
     ohos_hilog_binding::hilog_info!(format!("End time: {:?}", Instant::now()));
 }
+
+#[ffrt(qos = "Inherit")]
+pub async fn example_i() {
+    ohos_hilog_binding::hilog_info!("Example I called");
+}
+
+#[ffrt(priority = "High")]
+pub async fn example_j() {
+    ohos_hilog_binding::hilog_info!("Example J called");
+}
+
+#[ffrt(name = "example_k")]
+pub async fn example_k() {
+    ohos_hilog_binding::hilog_info!("Example K called");
+}
+
+#[ffrt(delay = 1000)]
+pub async fn example_l() {
+    ohos_hilog_binding::hilog_info!("Example L called");
+}
+
+#[ffrt(stack_size = 1024)]
+pub async fn example_m() {
+    ohos_hilog_binding::hilog_info!("Example M called");
+}
