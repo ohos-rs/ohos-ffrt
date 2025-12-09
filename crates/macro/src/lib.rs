@@ -30,7 +30,7 @@ impl Parse for MacroArgs {
                         && !value.value().eq_ignore_ascii_case("background")
                         && !value.value().eq_ignore_ascii_case("utility")
                         && !value.value().eq_ignore_ascii_case("default")
-                        && !value.value().eq_ignore_ascii_case("user_initiated")
+                        && !value.value().eq_ignore_ascii_case("userinitiated")
                     {
                         return Err(syn::Error::new_spanned(
                             value,
