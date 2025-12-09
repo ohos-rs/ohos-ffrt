@@ -1,6 +1,6 @@
 use futures::Future;
 use napi_ohos::{Env, Error, JsValue, Result, SendableResolver, Status, Unknown, sys};
-use ohos_ffrt::Runtime;
+use ohos_ffrt::{Runtime, TaskAttr};
 
 pub fn spawn_local<
     Data: 'static + Send,
@@ -8,6 +8,7 @@ pub fn spawn_local<
     Resolver: 'static + FnOnce(sys::napi_env, Data) -> Result<sys::napi_value>,
 >(
     env: sys::napi_env,
+    attr: Option<TaskAttr>,
     fut: Fut,
     resolver: Resolver,
 ) -> Result<sys::napi_value> {
@@ -31,7 +32,9 @@ pub fn spawn_local<
 
     let runtime = Runtime::new();
 
-    let jh = runtime.spawn(inner);
+    let attr = attr.unwrap_or_default();
+
+    let jh = runtime.spawn_with_attr(attr, inner);
 
     runtime.spawn(async move {
         if let Err(err) = jh.await {
