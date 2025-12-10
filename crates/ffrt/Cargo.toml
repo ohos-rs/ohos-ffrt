@@ -8,7 +8,6 @@ description = "ohos ffrt runtime bindings"
 [dependencies]
 ohos-ffrt-sys = { workspace = true }
 
-
 [features]
 default = []
 api-13 = []

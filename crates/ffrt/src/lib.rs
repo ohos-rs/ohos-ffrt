@@ -1,6 +1,4 @@
-//! OHOS FFRT Runtime
-//!
-//! 基于 FFRT (Function Flow Runtime) 的异步运行时实现
+//! OpenHarmony FFRT Runtime
 
 pub mod lock;
 pub mod runtime;
@@ -13,20 +11,28 @@ pub use runtime::*;
 pub use signal::*;
 pub use task::*;
 
-// 在默认运行时上执行future
+// Run future on default runtime
 pub fn block_on<F>(future: F) -> Result<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    Runtime::new().block_on(future)
+    RUNTIME
+        .read()
+        .ok()
+        .and_then(|rt| rt.as_ref().map(|rt| rt.block_on(future)))
+        .expect("Access FFRT runtime failed in spawn")
 }
 
-/// 生成新任务
+/// Spawn a new task on default runtime
 pub fn spawn<F>(future: F) -> runtime::JoinHandle<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    Runtime::new().spawn(future)
+    RUNTIME
+        .read()
+        .ok()
+        .and_then(|rt| rt.as_ref().map(|rt| rt.spawn(future)))
+        .expect("Access FFRT runtime failed in spawn")
 }

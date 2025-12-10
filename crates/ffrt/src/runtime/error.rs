@@ -1,12 +1,12 @@
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
-    /// 任务被取消
+    /// Task cancelled
     Cancelled,
-    /// 任务panic
+    /// Task panicked
     Panicked(String),
-    /// 超时
+    /// Timeout
     Timeout,
-    /// 其他错误
+    /// Other error
     Other(String),
 }
 
