@@ -22,7 +22,7 @@ pub const ffrt_queue_priority_t_ffrt_queue_priority_low: ffrt_queue_priority_t =
 #[doc = " Lowest priority, sorted by handle time, only distribute when there is no other level inside queue."]
 pub const ffrt_queue_priority_t_ffrt_queue_priority_idle: ffrt_queue_priority_t = 3;
 #[doc = " @brief Enumerates the task priority types.\n\n @since 12"]
-pub type ffrt_queue_priority_t = ::std::os::raw::c_uint;
+pub type ffrt_queue_priority_t = u32;
 #[doc = " Inheritance."]
 pub const ffrt_qos_default_t_ffrt_qos_inherit: ffrt_qos_default_t = -1;
 #[doc = " Background task."]
@@ -34,7 +34,7 @@ pub const ffrt_qos_default_t_ffrt_qos_default: ffrt_qos_default_t = 2;
 #[doc = " User initiated."]
 pub const ffrt_qos_default_t_ffrt_qos_user_initiated: ffrt_qos_default_t = 3;
 #[doc = " @brief Enumerates the task QoS types.\n\n @since 10"]
-pub type ffrt_qos_default_t = ::std::os::raw::c_int;
+pub type ffrt_qos_default_t = i32;
 #[doc = " @brief Defines the QoS type.\n\n @since 10"]
 pub type ffrt_qos_t = ::std::os::raw::c_int;
 #[doc = " @brief Defines the task function pointer type.\n\n @since 10"]
@@ -66,19 +66,19 @@ pub const ffrt_storage_size_t_ffrt_queue_attr_storage_size: ffrt_storage_size_t 
 pub const ffrt_storage_size_t_ffrt_rwlock_storage_size: ffrt_storage_size_t = 64;
 pub const ffrt_storage_size_t_ffrt_fiber_storage_size: ffrt_storage_size_t = 22;
 #[doc = " @brief Defines the storage size of multiple types of structs.\n\n @since 10"]
-pub type ffrt_storage_size_t = ::std::os::raw::c_uint;
+pub type ffrt_storage_size_t = u32;
 #[doc = " General task."]
 pub const ffrt_function_kind_t_ffrt_function_kind_general: ffrt_function_kind_t = 0;
 #[doc = " Queue task."]
 pub const ffrt_function_kind_t_ffrt_function_kind_queue: ffrt_function_kind_t = 1;
 #[doc = " @brief Enumerates the task types.\n\n @since 10"]
-pub type ffrt_function_kind_t = ::std::os::raw::c_uint;
+pub type ffrt_function_kind_t = u32;
 #[doc = " Data dependency type."]
 pub const ffrt_dependence_type_t_ffrt_dependence_data: ffrt_dependence_type_t = 0;
 #[doc = " Task dependency type."]
 pub const ffrt_dependence_type_t_ffrt_dependence_task: ffrt_dependence_type_t = 1;
 #[doc = " @brief Enumerates the dependency types.\n\n @since 10"]
-pub type ffrt_dependence_type_t = ::std::os::raw::c_uint;
+pub type ffrt_dependence_type_t = u32;
 #[doc = " @brief Defines the dependency data structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -126,7 +126,7 @@ pub const ffrt_error_t_ffrt_error_busy: ffrt_error_t = 16;
 #[doc = " A invalid value error."]
 pub const ffrt_error_t_ffrt_error_inval: ffrt_error_t = 22;
 #[doc = " @brief Enumerates the ffrt error codes.\n\n @since 10"]
-pub type ffrt_error_t = ::std::os::raw::c_int;
+pub type ffrt_error_t = i32;
 #[doc = " @brief Defines the condition variable attribute structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -156,7 +156,7 @@ pub const ffrt_mutex_type_ffrt_mutex_recursive: ffrt_mutex_type = 2;
 #[doc = " Default mutex type."]
 pub const ffrt_mutex_type_ffrt_mutex_default: ffrt_mutex_type = 0;
 #[doc = " @brief Enumerates the mutex types.\n\n Describes the mutex type, ffrt_mutex_normal is normal mutex;\n ffrt_mutex_recursive is recursive mutex, ffrt_mutex_default is normal mutex.\n\n @since 12"]
-pub type ffrt_mutex_type = ::std::os::raw::c_uint;
+pub type ffrt_mutex_type = u32;
 #[doc = " @brief Defines the mutex structure.\n\n @since 10"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -252,7 +252,7 @@ pub const ffrt_queue_type_t_ffrt_queue_concurrent: ffrt_queue_type_t = 1;
 #[doc = " Invalid queue."]
 pub const ffrt_queue_type_t_ffrt_queue_max: ffrt_queue_type_t = 2;
 #[doc = " @brief Enumerates the queue types.\n\n @since 12"]
-pub type ffrt_queue_type_t = ::std::os::raw::c_uint;
+pub type ffrt_queue_type_t = u32;
 #[doc = " @brief Defines the queue handle, which identifies different queues.\n\n @since 10"]
 pub type ffrt_queue_t = *mut ::std::os::raw::c_void;
 unsafe extern "C" {
