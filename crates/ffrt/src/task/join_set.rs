@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
 use crate::RuntimeError;
-use crate::runtime::Result as RuntimeResult;
+use crate::runtime::{AbortHandle, Result as RuntimeResult};
 use crate::signal::mpsc;
 
 struct Abortable<F> {
@@ -47,19 +47,6 @@ async fn run_task<F, V>(
     let _ = sender.send((id, output));
 }
 
-/// A handle used to abort a task spawned in a [`JoinSet`].
-#[derive(Clone, Debug)]
-pub struct AbortHandle {
-    cancelled: Arc<AtomicBool>,
-}
-
-impl AbortHandle {
-    /// Aborts the associated task.
-    pub fn abort(&self) {
-        self.cancelled.store(true, Ordering::Release);
-    }
-}
-
 /// A collection of tasks with tokio-like `join_next` semantics.
 pub struct JoinSet<V> {
     sender: mpsc::UnboundedSender<(u64, RuntimeResult<V>)>,
@@ -92,9 +79,7 @@ impl<V> JoinSet<V> {
         self.next_id = self.next_id.wrapping_add(1);
 
         let cancelled = Arc::new(AtomicBool::new(false));
-        let abort_handle = AbortHandle {
-            cancelled: cancelled.clone(),
-        };
+        let abort_handle = AbortHandle::new(cancelled.clone());
         self.abort_handles.push(abort_handle.clone());
         self.pending += 1;
 
@@ -114,9 +99,7 @@ impl<V> JoinSet<V> {
         self.next_id = self.next_id.wrapping_add(1);
 
         let cancelled = Arc::new(AtomicBool::new(false));
-        let abort_handle = AbortHandle {
-            cancelled: cancelled.clone(),
-        };
+        let abort_handle = AbortHandle::new(cancelled.clone());
         self.abort_handles.push(abort_handle.clone());
         self.pending += 1;
 

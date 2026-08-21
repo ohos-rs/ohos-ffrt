@@ -23,6 +23,21 @@ impl std::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
+impl RuntimeError {
+    /// Returns `true` if the task was cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, RuntimeError::Cancelled)
+    }
+
+    /// Returns `true` if the task panicked.
+    pub fn is_panic(&self) -> bool {
+        matches!(self, RuntimeError::Panicked(_))
+    }
+}
+
+/// Alias used by the tokio-compatible API.
+pub type JoinError = RuntimeError;
+
 impl From<std::io::Error> for RuntimeError {
     fn from(error: std::io::Error) -> Self {
         RuntimeError::Other(error.to_string())

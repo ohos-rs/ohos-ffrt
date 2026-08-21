@@ -1,5 +1,7 @@
 //! OpenHarmony FFRT Runtime
 
+mod macros;
+
 pub mod lock;
 pub mod runtime;
 pub mod signal;
@@ -17,7 +19,7 @@ pub mod time {
     pub use crate::timer::r#async::sleep_until;
     pub use crate::timer::interval::{Interval, MissedTickBehavior, interval, interval_at};
     pub use crate::timer::sync::sleep as sleep_blocking;
-    pub use crate::timer::timeout::{Elapsed, timeout};
+    pub use crate::timer::timeout::{Elapsed, timeout, timeout_at};
 }
 
 pub use lock::*;

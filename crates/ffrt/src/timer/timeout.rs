@@ -18,6 +18,14 @@ impl fmt::Display for Elapsed {
 
 impl std::error::Error for Elapsed {}
 
+/// Wrap a future with a timeout based on an absolute deadline.
+pub async fn timeout_at<F>(deadline: Instant, future: F) -> Result<F::Output, Elapsed>
+where
+    F: Future,
+{
+    Timeout { future, deadline }.await
+}
+
 /// Wrap a future with a timeout.
 ///
 /// If the future completes before the deadline, its output is returned as `Ok`.
@@ -26,11 +34,7 @@ pub async fn timeout<F>(duration: Duration, future: F) -> Result<F::Output, Elap
 where
     F: Future,
 {
-    Timeout {
-        future,
-        deadline: Instant::now() + duration,
-    }
-    .await
+    timeout_at(Instant::now() + duration, future).await
 }
 
 struct Timeout<F> {

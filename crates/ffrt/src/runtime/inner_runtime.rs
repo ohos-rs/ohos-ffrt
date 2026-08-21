@@ -6,11 +6,13 @@ use ffrt_sys::*;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
+
+static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 
 /// FFRT Runtime
 #[derive(Clone, Copy, Debug, Default)]
@@ -56,6 +58,7 @@ impl Runtime {
         JoinHandle {
             rx,
             cancelled: Arc::new(AtomicBool::new(false)),
+            id: Id::next(),
         }
     }
 
@@ -76,6 +79,7 @@ impl Runtime {
         JoinHandle {
             rx,
             cancelled: Arc::new(AtomicBool::new(false)),
+            id: Id::next(),
         }
     }
 
@@ -95,6 +99,7 @@ impl Runtime {
         JoinHandle {
             rx,
             cancelled: Arc::new(AtomicBool::new(false)),
+            id: Id::next(),
         }
     }
 
@@ -224,10 +229,49 @@ fn poll_once<F: Future>(mut future: F) -> F::Output {
     }
 }
 
+/// A unique identifier for a spawned task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Id(u64);
+
+impl Id {
+    fn next() -> Self {
+        Self(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A handle that can abort a spawned task.
+#[derive(Clone, Debug)]
+pub struct AbortHandle {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl AbortHandle {
+    pub(crate) fn new(cancelled: Arc<AtomicBool>) -> Self {
+        Self { cancelled }
+    }
+
+    /// Aborts the task associated with this handle.
+    pub fn abort(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Returns `true` if the task has been aborted.
+    pub fn is_aborted(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
 /// JoinHandle for a task
 pub struct JoinHandle<T> {
     rx: oneshot::Receiver<T>,
     cancelled: Arc<AtomicBool>,
+    id: Id,
 }
 
 impl<T> JoinHandle<T> {
@@ -248,6 +292,18 @@ impl<T> JoinHandle<T> {
     pub fn abort(&self) {
         self.cancelled.store(true, Ordering::Release);
         self.rx.wake_waiter();
+    }
+
+    /// Returns a handle that can be used to abort the task remotely.
+    pub fn abort_handle(&self) -> AbortHandle {
+        AbortHandle {
+            cancelled: self.cancelled.clone(),
+        }
+    }
+
+    /// Returns the task ID.
+    pub fn id(&self) -> Id {
+        self.id
     }
 }
 

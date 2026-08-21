@@ -5,11 +5,12 @@ mod qos;
 mod task;
 
 pub use attr::*;
-pub use join_set::{AbortHandle, JoinNext, JoinSet};
+pub use join_set::{JoinNext, JoinSet};
 pub use priority::*;
 pub use qos::*;
 pub use task::*;
 
 pub use crate::runtime::{
-    JoinFuture, JoinHandle, block_in_place, spawn, spawn_blocking, spawn_with_attr, yield_now,
+    AbortHandle, Id, JoinFuture, JoinHandle, block_in_place, spawn, spawn_blocking,
+    spawn_with_attr, yield_now,
 };
