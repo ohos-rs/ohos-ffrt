@@ -1,9 +1,11 @@
 mod attr;
+mod join_set;
 mod priority;
 mod qos;
 mod task;
 
 pub use attr::*;
+pub use join_set::{AbortHandle, JoinNext, JoinSet};
 pub use priority::*;
 pub use qos::*;
 pub use task::*;

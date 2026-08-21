@@ -112,7 +112,7 @@ impl Handle {
     /// Returns a handle for the active default runtime.
     pub fn current() -> Self {
         let runtime = super::active_runtime()
-            .read()
+            .lock()
             .ok()
             .and_then(|rt| rt.as_ref().copied())
             .expect("Access FFRT runtime failed in Handle::current");
@@ -360,7 +360,7 @@ where
     F::Output: Send + 'static,
 {
     super::active_runtime()
-        .read()
+        .lock()
         .ok()
         .and_then(|rt| rt.as_ref().map(|rt| rt.block_on(future)))
         .expect("Access FFRT runtime failed in block_on")
@@ -373,7 +373,7 @@ where
     F::Output: Send + 'static,
 {
     super::active_runtime()
-        .read()
+        .lock()
         .ok()
         .and_then(|rt| rt.as_ref().map(|rt| rt.spawn(future)))
         .expect("Access FFRT runtime failed in spawn")
@@ -386,7 +386,7 @@ where
     F::Output: Send + 'static,
 {
     super::active_runtime()
-        .read()
+        .lock()
         .ok()
         .and_then(|rt| rt.as_ref().map(|rt| rt.spawn_with_attr(attr, future)))
         .expect("Access FFRT runtime failed in spawn_with_attr")
@@ -399,7 +399,7 @@ where
     R: Send + 'static,
 {
     super::active_runtime()
-        .read()
+        .lock()
         .ok()
         .and_then(|rt| rt.as_ref().map(|rt| rt.spawn_blocking(func)))
         .expect("Access FFRT runtime failed in spawn_blocking")

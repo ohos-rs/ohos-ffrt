@@ -7,11 +7,7 @@ pub mod task;
 pub mod this_task;
 pub mod timer;
 
-/// Tokio-style sync compatibility module.
-pub mod sync {
-    pub use crate::lock::*;
-    pub use crate::signal::*;
-}
+pub mod sync;
 
 /// Tokio-style time compatibility module.
 pub mod time {
@@ -19,6 +15,7 @@ pub mod time {
 
     pub use crate::timer::r#async::sleep;
     pub use crate::timer::r#async::sleep_until;
+    pub use crate::timer::interval::{Interval, MissedTickBehavior, interval, interval_at};
     pub use crate::timer::sync::sleep as sleep_blocking;
     pub use crate::timer::timeout::{Elapsed, timeout};
 }
