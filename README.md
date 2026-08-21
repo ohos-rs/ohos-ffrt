@@ -1,16 +1,21 @@
-# ohos-ffrt
+# ffrt
 
-![Crates.io Version](https://img.shields.io/crates/v/ohos-ffrt) ![Platform](https://img.shields.io/badge/platform-arm64/arm/x86__64-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Crates.io Version](https://img.shields.io/crates/v/ffrt) ![Platform](https://img.shields.io/badge/platform-arm64/arm/x86__64-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This project provide a ffrt-binding and napi-ext for ffrt.
+This project provides FFRT bindings and a napi extension for FFRT.
 
-**Note: Don't use it to replace `tokio` directly, it only works for some simple scenarios now.**
+The `ffrt` crate exposes tokio-style entry points such as `spawn`,
+`spawn_blocking`, `block_on`, `time::sleep`, `time::timeout`, `sync::mpsc`,
+and `sync::oneshot`. It still does not cover the full tokio feature set, so
+evaluate your use case before replacing tokio directly.
 
 ## Install
 
 ```bash
-cargo add ohos-ffrt
-# or
+cargo add ffrt
+# raw sys bindings
+cargo add ffrt-sys
+# or the napi extension
 cargo add ohos-ext
 ```
 
@@ -20,7 +25,7 @@ We can use it as another thread.
 
 ```rs
 use napi_derive_ohos::napi;
-use ohos_ffrt::Task;
+use ffrt::Task;
 
 #[napi]
 pub fn run_ffrt() -> () {

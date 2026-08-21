@@ -55,6 +55,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5"
 
 [[package]]
+name = "ffrt"
+version = "0.1.0"
+dependencies = [
+ "ffrt-sys",
+]
+
+[[package]]
+name = "ffrt-sys"
+version = "0.1.0"
+
+[[package]]
 name = "futures"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -237,11 +248,11 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 name = "ohos-ext"
 version = "0.1.0"
 dependencies = [
+ "ffrt",
+ "ffrt-sys",
  "futures",
  "napi-ohos",
  "ohos-ext-macro",
- "ohos-ffrt",
- "ohos-ffrt-sys",
 ]
 
 [[package]]
@@ -252,17 +263,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "ohos-ffrt"
-version = "0.1.0"
-dependencies = [
- "ohos-ffrt-sys",
-]
-
-[[package]]
-name = "ohos-ffrt-sys"
-version = "0.1.0"
 
 [[package]]
 name = "ohos-hilog-binding"
@@ -325,10 +325,10 @@ checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 name = "simple-ffrt"
 version = "0.1.0"
 dependencies = [
+ "ffrt",
  "napi-build-ohos",
  "napi-derive-ohos",
  "napi-ohos",
- "ohos-ffrt",
  "ohos-hilog-binding",
 ]
 

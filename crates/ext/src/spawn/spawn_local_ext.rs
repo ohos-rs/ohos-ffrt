@@ -1,9 +1,9 @@
+use ffrt::TaskAttr;
 use futures::Future;
 use napi_ohos::{
     Env, Result,
     bindgen_prelude::{PromiseRaw, ToNapiValue},
 };
-use ohos_ffrt::TaskAttr;
 
 use crate::spawn_local;
 

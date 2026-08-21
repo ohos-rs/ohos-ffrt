@@ -4,35 +4,26 @@ pub mod lock;
 pub mod runtime;
 pub mod signal;
 pub mod task;
+pub mod this_task;
 pub mod timer;
+
+/// Tokio-style sync compatibility module.
+pub mod sync {
+    pub use crate::lock::*;
+    pub use crate::signal::*;
+}
+
+/// Tokio-style time compatibility module.
+pub mod time {
+    pub use std::time::{Duration, Instant};
+
+    pub use crate::timer::r#async::sleep;
+    pub use crate::timer::r#async::sleep_until;
+    pub use crate::timer::sync::sleep as sleep_blocking;
+    pub use crate::timer::timeout::{Elapsed, timeout};
+}
 
 pub use lock::*;
 pub use runtime::*;
 pub use signal::*;
 pub use task::*;
-
-// Run future on default runtime
-pub fn block_on<F>(future: F) -> Result<F::Output>
-where
-    F: std::future::Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    RUNTIME
-        .read()
-        .ok()
-        .and_then(|rt| rt.as_ref().map(|rt| rt.block_on(future)))
-        .expect("Access FFRT runtime failed in spawn")
-}
-
-/// Spawn a new task on default runtime
-pub fn spawn<F>(future: F) -> runtime::JoinHandle<F::Output>
-where
-    F: std::future::Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    RUNTIME
-        .read()
-        .ok()
-        .and_then(|rt| rt.as_ref().map(|rt| rt.spawn(future)))
-        .expect("Access FFRT runtime failed in spawn")
-}

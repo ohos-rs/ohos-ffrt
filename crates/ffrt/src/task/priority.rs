@@ -1,6 +1,6 @@
 #![allow(warnings)]
 
-use ohos_ffrt_sys::{
+use ffrt_sys::{
     ffrt_queue_priority_t, ffrt_queue_priority_t_ffrt_queue_priority_high,
     ffrt_queue_priority_t_ffrt_queue_priority_idle,
     ffrt_queue_priority_t_ffrt_queue_priority_immediate,

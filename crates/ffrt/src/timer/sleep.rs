@@ -1,5 +1,5 @@
 pub mod sync {
-    use ohos_ffrt_sys::{ffrt_error_t_ffrt_success, ffrt_usleep};
+    use ffrt_sys::{ffrt_error_t_ffrt_success, ffrt_usleep};
     use std::time::Duration;
 
     /// Sleep for a given duration
@@ -12,7 +12,7 @@ pub mod sync {
 }
 
 pub mod r#async {
-    use ohos_ffrt_sys::ffrt_usleep;
+    use ffrt_sys::ffrt_usleep;
     use std::{
         pin::Pin,
         task::{Context, Poll},
@@ -46,5 +46,13 @@ pub mod r#async {
             deadline: Instant::now() + duration,
         }
         .await
+    }
+
+    /// Sleep until the supplied deadline.
+    pub async fn sleep_until(deadline: Instant) {
+        let now = Instant::now();
+        if deadline > now {
+            sleep(deadline - now).await;
+        }
     }
 }

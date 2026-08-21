@@ -15,7 +15,7 @@ napi-ohos = { workspace = true, default-features = false, features = [
     "async",
 ] }
 napi-derive-ohos = { workspace = true }
-ohos-ffrt = { workspace = true }
+ffrt = { workspace = true }
 ohos-hilog-binding = { version = "*" }
 
 [build-dependencies]

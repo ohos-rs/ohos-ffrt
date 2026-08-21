@@ -1,4 +1,4 @@
-use ohos_ffrt_sys::*;
+use ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::pin::Pin;
@@ -37,11 +37,11 @@ impl<T: std::fmt::Debug> std::error::Error for SendError<T> {}
 /// # Examples
 ///
 /// ```no_run
-/// use ohos_ffrt::signal::oneshot;
+/// use ffrt::signal::oneshot;
 ///
 /// let (tx, rx) = oneshot::channel();
 ///
-/// ohos_ffrt::spawn(async move {
+/// ffrt::spawn(async move {
 ///     if let Err(_) = tx.send(42) {
 ///         println!("Receiver dropped");
 ///     }
@@ -170,7 +170,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```no_run
-    /// use ohos_ffrt::signal::oneshot;
+    /// use ffrt::signal::oneshot;
     ///
     /// let (tx, rx) = oneshot::channel();
     ///
@@ -269,7 +269,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```no_run
-    /// use ohos_ffrt::signal::oneshot;
+    /// use ffrt::signal::oneshot;
     ///
     /// let (tx, mut rx) = oneshot::channel();
     ///
@@ -302,7 +302,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```no_run
-    /// use ohos_ffrt::signal::oneshot;
+    /// use ffrt::signal::oneshot;
     /// use std::thread;
     ///
     /// let (tx, rx) = oneshot::channel();
@@ -333,6 +333,27 @@ impl<T> Receiver<T> {
             }
         } else {
             Err(RecvError)
+        }
+    }
+
+    /// Check whether the value has been sent or the channel has been closed.
+    pub fn is_finished(&self) -> bool {
+        if let Some(shared) = &self.shared {
+            let guard = shared.lock();
+            guard.inner().value.is_some() || !guard.inner().sender_alive
+        } else {
+            true
+        }
+    }
+
+    /// Wake any task currently waiting on this receiver.
+    pub fn wake_waiter(&self) {
+        if let Some(shared) = &self.shared {
+            let mut guard = shared.lock();
+            if let Some(waker) = guard.inner_mut().waker.take() {
+                waker.wake();
+            }
+            guard.broadcast();
         }
     }
 

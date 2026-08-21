@@ -5,7 +5,7 @@ use std::{
     task::{RawWaker, RawWakerVTable, Waker},
 };
 
-use ohos_ffrt_sys::{
+use ffrt_sys::{
     ffrt_cond_destroy, ffrt_cond_init, ffrt_cond_signal, ffrt_cond_t, ffrt_cond_timedwait,
     ffrt_cond_wait, ffrt_mutex_destroy, ffrt_mutex_init, ffrt_mutex_lock, ffrt_mutex_t,
     ffrt_mutex_unlock, timespec,
@@ -70,7 +70,12 @@ impl WakerState {
         unsafe {
             ffrt_mutex_lock(self.mutex.as_ptr());
 
-            // 计算绝对超时时间点
+            if *self.woken.get() {
+                *self.woken.get() = false;
+                ffrt_mutex_unlock(self.mutex.as_ptr());
+                return;
+            }
+
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("SystemTime before UNIX EPOCH");
@@ -90,6 +95,7 @@ impl WakerState {
                 &ts as *const timespec,
             );
 
+            *self.woken.get() = false;
             ffrt_mutex_unlock(self.mutex.as_ptr());
         }
     }
@@ -97,7 +103,15 @@ impl WakerState {
     pub fn wait(&self) {
         unsafe {
             ffrt_mutex_lock(self.mutex.as_ptr());
+
+            if *self.woken.get() {
+                *self.woken.get() = false;
+                ffrt_mutex_unlock(self.mutex.as_ptr());
+                return;
+            }
+
             ffrt_cond_wait(self.cond.as_ptr(), self.mutex.as_ptr());
+            *self.woken.get() = false;
             ffrt_mutex_unlock(self.mutex.as_ptr());
         }
     }

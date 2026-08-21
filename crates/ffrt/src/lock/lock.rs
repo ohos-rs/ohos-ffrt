@@ -1,6 +1,6 @@
 #![allow(warnings)]
 
-use ohos_ffrt_sys::{
+use ffrt_sys::{
     ffrt_mutex_type, ffrt_mutex_type_ffrt_mutex_default, ffrt_mutex_type_ffrt_mutex_normal,
     ffrt_mutex_type_ffrt_mutex_recursive,
 };

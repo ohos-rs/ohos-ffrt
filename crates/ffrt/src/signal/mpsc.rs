@@ -1,4 +1,4 @@
-use ohos_ffrt_sys::*;
+use ffrt_sys::*;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -14,11 +14,11 @@ use std::task::{Context, Poll, Waker};
 /// # Examples
 ///
 /// ```no_run
-/// use ohos_ffrt::signal::mpsc;
+/// use ffrt::signal::mpsc;
 ///
 /// let (tx, mut rx) = mpsc::unbounded_channel();
 ///
-/// ohos_ffrt::spawn(async move {
+/// ffrt::spawn(async move {
 ///     tx.send(42).unwrap();
 /// });
 ///
@@ -43,11 +43,11 @@ pub fn unbounded_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
 /// # Examples
 ///
 /// ```no_run
-/// use ohos_ffrt::signal::mpsc;
+/// use ffrt::signal::mpsc;
 ///
 /// let (tx, mut rx) = mpsc::channel(10);
 ///
-/// ohos_ffrt::spawn(async move {
+/// ffrt::spawn(async move {
 ///     for i in 0..5 {
 ///         tx.send(i).await.unwrap();
 ///     }
