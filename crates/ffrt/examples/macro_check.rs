@@ -20,6 +20,16 @@ pub async fn g() {
     let _ = value;
 }
 
+pub async fn h() {
+    let cell = ffrt::sync::OnceCell::new();
+    let value = cell.get_or_init(async { 1 }).await;
+    let _ = *value;
+    let result = cell
+        .get_or_try_init(async { Ok::<_, &'static str>(2) })
+        .await;
+    let _ = result;
+}
+
 #[allow(clippy::let_underscore_future)]
 fn main() {
     let fut = async {};
