@@ -3,6 +3,7 @@
 mod macros;
 
 pub mod lock;
+pub mod queue;
 pub mod runtime;
 pub mod signal;
 pub mod task;
