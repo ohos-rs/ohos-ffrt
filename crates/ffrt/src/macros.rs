@@ -210,6 +210,10 @@ macro_rules! pin {
 /// Polls futures and returns the handler of the first ready branch.
 #[macro_export]
 macro_rules! select {
+    (biased; $($branch:tt)*) => {
+        $crate::select!($($branch)*)
+    };
+
     ($pat1:pat = $fut1:expr => $handler1:expr $(,)?) => {{
         async move {
             let mut fut1 = ::std::pin::pin!(Some($fut1));

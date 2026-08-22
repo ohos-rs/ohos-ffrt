@@ -28,6 +28,16 @@ pub async fn g() {
     let _ = value3;
 }
 
+pub async fn local_demo() {
+    use std::rc::Rc;
+    let mut local = ffrt::task::LocalSet::new();
+    let value = Rc::new(5);
+    local.spawn_local(async move {
+        let _ = value;
+    });
+    local.run_until(async {}).await;
+}
+
 pub async fn h() {
     let cell = ffrt::sync::OnceCell::new();
     let value = cell.get_or_init(async { 1 }).await;

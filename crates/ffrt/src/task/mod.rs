@@ -1,11 +1,13 @@
 mod attr;
 mod join_set;
+mod local_set;
 mod priority;
 mod qos;
 mod task;
 
 pub use attr::*;
 pub use join_set::{JoinNext, JoinSet};
+pub use local_set::{LocalSet, RunUntil};
 pub use priority::*;
 pub use qos::*;
 pub use task::*;
