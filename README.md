@@ -4,16 +4,17 @@
 
 This project provides FFRT bindings and a napi extension for FFRT.
 
-The `ffrt` crate exposes tokio-style entry points such as `spawn`,
-`spawn_blocking`, `block_on`, `time::sleep`, `time::timeout`, `sync::mpsc`,
-and `sync::oneshot`. It still does not cover the full tokio feature set, so
-evaluate your use case before replacing tokio directly.
+The `ffrt` crate is an OHOS execution backend for Tokio's stable production
+surface. An OHOS target can depend on the package as `tokio` and retain Tokio
+imports; see [the compatibility contract](./TOKIO_COMPATIBILITY.md) for the
+supported surface and deliberate FFRT scheduler/test-tool differences.
 
 The I/O layer uses an FFRT loop readiness reactor. It includes `AsyncFd`,
 non-blocking TCP/UDP types, `AsyncRead`/`AsyncWrite` extensions, `copy`,
 `split`, `BufReader`, and `BufWriter`. Synchronization includes owned mutex,
 rwlock, and semaphore guards; task-local values, Unix signals, and fair
-multi-branch `select!` are also available.
+`select!` with up to 64 branches are also available. Unix modules are compiled
+only for `target_env = "ohos"`.
 
 ## Install
 
