@@ -302,3 +302,32 @@ impl<T: Clone> Future for RecvFuture<'_, T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_recv_try() {
+        let (tx, mut rx) = channel(4);
+        tx.send(42).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), 42);
+    }
+
+    #[test]
+    fn lagged_returns_oldest() {
+        let (tx, mut rx) = channel(2);
+        for value in 0..5 {
+            tx.send(value).unwrap();
+        }
+
+        let result = crate::Runtime::new().block_on(async move {
+            match rx.recv().await {
+                Ok(_) => Ok(()),
+                Err(RecvError::Lagged(_)) => Ok(()),
+                Err(_) => Err(crate::RuntimeError::Other("unexpected".into())),
+            }
+        });
+        assert!(result.is_ok());
+    }
+}

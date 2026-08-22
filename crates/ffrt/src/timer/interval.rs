@@ -145,3 +145,20 @@ impl Future for Tick<'_> {
         Poll::Ready(this.interval.advance())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interval_ticks_forward() {
+        let result = crate::Runtime::new().block_on(async move {
+            let mut interval = interval(Duration::from_millis(1));
+            let first = interval.tick().await;
+            let second = interval.tick().await;
+            assert!(second >= first);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+}

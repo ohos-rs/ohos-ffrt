@@ -374,3 +374,38 @@ impl<T> Drop for Ref<'_, T> {
         self.guard.take();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_and_changed() {
+        let (tx, mut rx) = channel(1);
+        tx.send(2).unwrap();
+        let result = crate::Runtime::new().block_on(async move {
+            rx.changed().await.unwrap();
+            assert_eq!(*rx.borrow(), 2);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn wait_for_predicate() {
+        let (tx, mut rx) = channel(1);
+        tx.send(5).unwrap();
+        let result = crate::Runtime::new().block_on(async move {
+            rx.wait_for(|value| *value >= 5).await.unwrap();
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn send_modify_updates_value() {
+        let (tx, mut rx) = channel(1);
+        tx.send_modify(|value| *value += 1);
+        assert_eq!(*rx.borrow_and_update(), 2);
+    }
+}

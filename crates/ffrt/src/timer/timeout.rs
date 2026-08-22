@@ -69,3 +69,23 @@ impl<F: Future> Future for Timeout<F> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeout_ready_future() {
+        let result =
+            crate::Runtime::new().block_on(timeout(Duration::from_millis(10), async { 42 }));
+        assert!(matches!(result, Ok(Ok(42))));
+    }
+
+    #[test]
+    fn timeout_at_deadline() {
+        let deadline = Instant::now() + Duration::from_millis(1);
+        let result =
+            crate::Runtime::new().block_on(timeout_at(deadline, std::future::pending::<i32>()));
+        assert!(matches!(result, Ok(Err(Elapsed))));
+    }
+}

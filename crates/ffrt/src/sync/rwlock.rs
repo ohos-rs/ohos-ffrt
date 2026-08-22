@@ -216,3 +216,24 @@ impl<T> Drop for RwLockWriteGuard<'_, T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_read_write() {
+        let lock = RwLock::new(1);
+        let result = crate::Runtime::new().block_on(async move {
+            let read = lock.read().await;
+            assert_eq!(*read, 1);
+            drop(read);
+
+            let mut write = lock.write().await;
+            *write += 1;
+            assert_eq!(*write, 2);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+}

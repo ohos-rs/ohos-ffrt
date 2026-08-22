@@ -236,3 +236,28 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_or_init_sets_value() {
+        let cell = OnceCell::new();
+        let result = crate::Runtime::new().block_on(async move {
+            let value = cell.get_or_init(async { 42 }).await;
+            assert_eq!(*value, 42);
+            let again = cell.get_or_init(async { 0 }).await;
+            assert_eq!(*again, 42);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn set_rejects_duplicate() {
+        let cell = OnceCell::new();
+        assert!(cell.set(1).is_ok());
+        assert!(cell.set(2).is_err());
+    }
+}

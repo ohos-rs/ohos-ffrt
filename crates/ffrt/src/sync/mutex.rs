@@ -146,3 +146,29 @@ impl<T> Drop for MutexGuard<'_, T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_lock_and_guard() {
+        let mutex = Mutex::new(1);
+        let result = crate::Runtime::new().block_on(async move {
+            let mut guard = mutex.lock().await;
+            *guard += 1;
+            assert_eq!(*guard, 2);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn try_lock() {
+        let mutex = Mutex::new(1);
+        let guard = mutex.try_lock().unwrap();
+        assert!(mutex.try_lock().is_err());
+        drop(guard);
+        assert!(mutex.try_lock().is_ok());
+    }
+}

@@ -181,3 +181,36 @@ impl<V> Future for JoinNext<'_, V> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_set_receives_results() {
+        let result = crate::Runtime::new().block_on(async move {
+            let mut set = JoinSet::new();
+            set.spawn(async { 1 });
+            set.spawn(async { 2 });
+
+            let mut values = Vec::new();
+            while let Some(item) = set.join_next().await {
+                values.push(item?);
+            }
+
+            values.sort();
+            assert_eq!(values, vec![1, 2]);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn abort_handle_marks_cancelled() {
+        let mut set = JoinSet::new();
+        let handle = set.spawn(async { 1 });
+        handle.abort();
+        assert_eq!(set.len(), 1);
+        set.shutdown();
+    }
+}

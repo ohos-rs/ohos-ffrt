@@ -950,3 +950,45 @@ impl<T> Drop for UnboundedReceiver<T> {
         guard.broadcast();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn recv_timeout_empty() {
+        let (_tx, mut rx) = channel::<i32>(1);
+        let result = crate::Runtime::new()
+            .block_on(async move { rx.recv_timeout(Duration::from_millis(1)).await });
+        assert!(matches!(result, Ok(Err(RecvTimeoutError::Timeout))));
+    }
+
+    #[test]
+    fn send_timeout_full() {
+        let (tx, mut rx) = channel::<i32>(1);
+        tx.try_send(1).unwrap();
+        let result = crate::Runtime::new().block_on(async move {
+            let send = tx.send_timeout(2, Duration::from_millis(1)).await;
+            let _ = rx.try_recv();
+            send
+        });
+        assert!(matches!(result, Ok(Err(SendTimeoutError::Timeout(_)))));
+    }
+
+    #[test]
+    fn recv_many_drains() {
+        let (tx, mut rx) = channel::<i32>(10);
+        for value in 0..3 {
+            tx.try_send(value).unwrap();
+        }
+
+        let result = crate::Runtime::new().block_on(async move {
+            let mut buf = Vec::new();
+            let n = rx.recv_many(&mut buf, 10).await;
+            assert_eq!(n, 3);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+}

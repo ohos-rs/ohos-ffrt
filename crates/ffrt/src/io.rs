@@ -280,3 +280,32 @@ where
         Pin::new(&mut *this.writer).poll_shutdown(cx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_from_slice() {
+        let result = crate::Runtime::new().block_on(async move {
+            let mut data: &[u8] = b"hello";
+            let mut buf = [0u8; 2];
+            let n = data.read(&mut buf).await?;
+            assert_eq!(n, 2);
+            assert_eq!(&buf[..2], b"he");
+            Ok::<(), std::io::Error>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn write_to_vec() {
+        let result = crate::Runtime::new().block_on(async move {
+            let mut writer = Vec::new();
+            writer.write_all(b"hello").await?;
+            assert_eq!(writer, b"hello");
+            Ok::<(), std::io::Error>(())
+        });
+        assert!(result.is_ok());
+    }
+}

@@ -80,3 +80,36 @@ impl Future for Notified<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notify_one_consumed_by_notified() {
+        let notify = Notify::new();
+        notify.notify_one();
+        let result = crate::Runtime::new().block_on(async move {
+            notify.notified().await;
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn notify_waiters_wakes_waiting_task() {
+        use std::sync::Arc;
+
+        let notify = Arc::new(Notify::new());
+        let notified = notify.clone();
+        let result = crate::Runtime::new().block_on(async move {
+            let handle = crate::spawn(async move {
+                notified.notified().await;
+            });
+
+            notify.notify_waiters();
+            handle.await
+        });
+
+        assert!(result.is_ok());
+    }
+}

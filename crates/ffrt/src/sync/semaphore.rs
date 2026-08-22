@@ -232,3 +232,38 @@ impl fmt::Display for TryAcquireError {
 }
 
 impl std::error::Error for TryAcquireError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permits_are_returned_on_drop() {
+        let semaphore = Semaphore::new(1);
+        let permit = semaphore.try_acquire().unwrap();
+        assert_eq!(semaphore.available_permits(), 0);
+        drop(permit);
+        assert_eq!(semaphore.available_permits(), 1);
+    }
+
+    #[test]
+    fn try_acquire_fails_when_empty() {
+        let semaphore = Semaphore::new(0);
+        assert!(matches!(
+            semaphore.try_acquire(),
+            Err(TryAcquireError::NoPermits)
+        ));
+    }
+
+    #[test]
+    fn add_permits_and_acquire_async() {
+        let semaphore = Semaphore::new(0);
+        semaphore.add_permits(2);
+        let result = crate::Runtime::new().block_on(async move {
+            let _p1 = semaphore.acquire().await.unwrap();
+            let _p2 = semaphore.acquire().await.unwrap();
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+}

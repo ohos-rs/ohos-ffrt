@@ -100,3 +100,24 @@ impl BarrierWaitResult {
         self.leader
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn barrier_releases_all_tasks() {
+        let barrier = Arc::new(Barrier::new(2));
+        let b = barrier.clone();
+        let result = crate::Runtime::new().block_on(async move {
+            let handle = crate::spawn(async move { b.wait().await });
+
+            let mine = barrier.wait().await;
+            let theirs = handle.await?;
+            assert!(mine.is_leader() || theirs.is_leader());
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+}

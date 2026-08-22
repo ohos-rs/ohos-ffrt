@@ -134,3 +134,22 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_set_accepts_non_send_future() {
+        use std::rc::Rc;
+
+        let mut local = LocalSet::new();
+        let value = Rc::new(7);
+        local.spawn_local(async move {
+            let _ = value;
+        });
+
+        assert_eq!(local.len(), 1);
+        assert!(!local.is_empty());
+    }
+}
