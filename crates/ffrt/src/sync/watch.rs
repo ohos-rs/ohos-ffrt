@@ -96,6 +96,35 @@ impl<T> Sender<T> {
         Ok(old)
     }
 
+    /// Applies `func` to the current value and notifies receivers.
+    pub fn send_modify<F>(&self, func: F)
+    where
+        F: FnOnce(&mut T),
+    {
+        let mut state = self.shared.lock().unwrap();
+        func(&mut state.value);
+        state.version = state.version.wrapping_add(1);
+        while let Some(waker) = state.waiters.pop_front() {
+            waker.wake();
+        }
+    }
+
+    /// Applies `func` to the current value and notifies receivers if it returns `true`.
+    pub fn send_if_modified<F>(&self, func: F) -> bool
+    where
+        F: FnOnce(&mut T) -> bool,
+    {
+        let mut state = self.shared.lock().unwrap();
+        if !func(&mut state.value) {
+            return false;
+        }
+        state.version = state.version.wrapping_add(1);
+        while let Some(waker) = state.waiters.pop_front() {
+            waker.wake();
+        }
+        true
+    }
+
     /// Sends a value even if no receivers are currently connected.
     pub fn broadcast(&self, value: T) {
         let mut state = self.shared.lock().unwrap();
@@ -185,6 +214,18 @@ impl<T> Receiver<T> {
     pub fn has_changed(&self) -> bool {
         let state = self.shared.lock().unwrap();
         state.version != self.seen
+    }
+
+    /// Marks the current value as seen.
+    pub fn mark_seen(&mut self) {
+        let state = self.shared.lock().unwrap();
+        self.seen = state.version;
+    }
+
+    /// Marks the current value as unseen, so `changed` returns immediately.
+    pub fn mark_changed(&mut self) {
+        let state = self.shared.lock().unwrap();
+        self.seen = state.version.wrapping_sub(1);
     }
 
     /// Waits for a value that has not been seen yet.
