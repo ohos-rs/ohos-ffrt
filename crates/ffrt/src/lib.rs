@@ -5,6 +5,7 @@ mod macros;
 pub mod fs;
 pub mod lock;
 pub mod looper;
+pub mod process;
 pub mod queue;
 pub mod runtime;
 pub mod signal;
