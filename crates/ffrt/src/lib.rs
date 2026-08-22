@@ -3,6 +3,7 @@
 mod macros;
 
 pub mod fs;
+pub mod io;
 pub mod lock;
 pub mod looper;
 pub mod net;
