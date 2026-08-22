@@ -13,6 +13,7 @@ struct WatchState<T> {
     senders: usize,
     receivers: usize,
     waiters: VecDeque<Waker>,
+    closed_waiters: VecDeque<Waker>,
 }
 
 /// Creates a watch channel: a single-producer, multi-consumer channel where
@@ -24,6 +25,7 @@ pub fn channel<T>(init: T) -> (Sender<T>, Receiver<T>) {
         senders: 1,
         receivers: 1,
         waiters: VecDeque::new(),
+        closed_waiters: VecDeque::new(),
     }));
 
     (
@@ -131,6 +133,11 @@ impl<T> Sender<T> {
         let state = self.shared.lock().unwrap();
         state.receivers == 0
     }
+
+    /// Waits until all receivers have been dropped.
+    pub fn closed(&mut self) -> Closed<'_, T> {
+        Closed { sender: self }
+    }
 }
 
 impl<T> Clone for Sender<T> {
@@ -185,6 +192,17 @@ impl<T> Receiver<T> {
         Changed { receiver: self }
     }
 
+    /// Waits for a value that satisfies `predicate`.
+    pub fn wait_for<F>(&mut self, predicate: F) -> WaitFor<'_, T, F>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        WaitFor {
+            receiver: self,
+            predicate,
+        }
+    }
+
     /// Returns the version of the most recently observed value.
     pub fn borrow_and_update_version(&mut self) -> u64 {
         let state = self.shared.lock().unwrap();
@@ -208,6 +226,11 @@ impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
         let mut state = self.shared.lock().unwrap();
         state.receivers -= 1;
+        if state.receivers == 0 {
+            while let Some(waker) = state.closed_waiters.pop_front() {
+                waker.wake();
+            }
+        }
     }
 }
 
@@ -235,6 +258,60 @@ impl<T> Future for Changed<'_, T> {
 
         state.waiters.push_back(cx.waker().clone());
         Poll::Pending
+    }
+}
+
+/// Future returned by [`Receiver::wait_for`].
+#[must_use = "futures do nothing unless polled"]
+pub struct WaitFor<'a, T, F> {
+    receiver: &'a mut Receiver<T>,
+    predicate: F,
+}
+
+impl<T, F> Future for WaitFor<'_, T, F>
+where
+    F: FnMut(&T) -> bool,
+{
+    type Output = Result<(), RecvError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // SAFETY: `predicate` is pinned through `self` and never moved.
+        let this = unsafe { self.get_unchecked_mut() };
+        let mut state = this.receiver.shared.lock().unwrap();
+
+        if (this.predicate)(&state.value) {
+            this.receiver.seen = state.version;
+            return Poll::Ready(Ok(()));
+        }
+
+        if state.senders == 0 {
+            return Poll::Ready(Err(RecvError));
+        }
+
+        state.waiters.push_back(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
+/// Future returned by [`Sender::closed`].
+#[must_use = "futures do nothing unless polled"]
+pub struct Closed<'a, T> {
+    sender: &'a mut Sender<T>,
+}
+
+impl<T> Future for Closed<'_, T> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let mut state = this.sender.shared.lock().unwrap();
+
+        if state.receivers == 0 {
+            Poll::Ready(())
+        } else {
+            state.closed_waiters.push_back(cx.waker().clone());
+            Poll::Pending
+        }
     }
 }
 

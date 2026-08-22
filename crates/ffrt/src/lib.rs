@@ -3,6 +3,7 @@
 mod macros;
 
 pub mod lock;
+pub mod looper;
 pub mod queue;
 pub mod runtime;
 pub mod signal;

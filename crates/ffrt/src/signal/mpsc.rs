@@ -131,6 +131,46 @@ impl std::fmt::Display for TryRecvError {
 
 impl std::error::Error for TryRecvError {}
 
+/// Error returned by [`Sender::send_timeout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendTimeoutError<T> {
+    /// The send timed out.
+    Timeout(T),
+    /// The receiver was closed.
+    Closed(T),
+}
+
+impl<T> std::fmt::Display for SendTimeoutError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendTimeoutError::Timeout(_) => write!(f, "send timed out"),
+            SendTimeoutError::Closed(_) => write!(f, "receiver dropped"),
+        }
+    }
+}
+
+impl<T: std::fmt::Debug> std::error::Error for SendTimeoutError<T> {}
+
+/// Error returned by [`Receiver::recv_timeout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecvTimeoutError {
+    /// The receive timed out.
+    Timeout,
+    /// All senders were closed.
+    Closed,
+}
+
+impl std::fmt::Display for RecvTimeoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecvTimeoutError::Timeout => write!(f, "receive timed out"),
+            RecvTimeoutError::Closed => write!(f, "all senders dropped"),
+        }
+    }
+}
+
+impl std::error::Error for RecvTimeoutError {}
+
 struct Inner<T> {
     queue: VecDeque<T>,
     capacity: Option<usize>,
@@ -249,6 +289,17 @@ impl<T> Sender<T> {
             value: Some(value),
         }
         .await
+    }
+
+    /// Sends a value, waiting at most `timeout` for queue capacity.
+    pub fn send_timeout(&self, value: T, timeout: std::time::Duration) -> SendTimeoutFuture<T> {
+        SendTimeoutFuture {
+            send: SendFuture {
+                shared: self.shared.clone(),
+                value: Some(value),
+            },
+            deadline: std::time::Instant::now() + timeout,
+        }
     }
 
     /// 尝试立即发送值
@@ -408,6 +459,36 @@ impl<T> Future for SendFuture<T> {
     }
 }
 
+/// 超时发送 Future
+pub struct SendTimeoutFuture<T> {
+    send: SendFuture<T>,
+    deadline: std::time::Instant,
+}
+
+impl<T> Future for SendTimeoutFuture<T> {
+    type Output = Result<(), SendTimeoutError<T>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // SAFETY: `send` is pinned through `self`.
+        let this = unsafe { self.get_unchecked_mut() };
+        if std::time::Instant::now() >= this.deadline {
+            let value = this
+                .send
+                .value
+                .take()
+                .expect("send value missing on timeout");
+            return Poll::Ready(Err(SendTimeoutError::Timeout(value)));
+        }
+
+        let send = unsafe { Pin::new_unchecked(&mut this.send) };
+        match send.poll(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(SendError(value))) => Poll::Ready(Err(SendTimeoutError::Closed(value))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 /// 有界 mpsc channel 的接收端
 pub struct Receiver<T> {
     shared: Arc<Shared<T>>,
@@ -422,6 +503,14 @@ impl<T> Receiver<T> {
             shared: self.shared.clone(),
         }
         .await
+    }
+
+    /// Receives a value, waiting at most `timeout`.
+    pub fn recv_timeout(&mut self, timeout: std::time::Duration) -> RecvTimeoutFuture<'_, T> {
+        RecvTimeoutFuture {
+            receiver: self,
+            deadline: std::time::Instant::now() + timeout,
+        }
     }
 
     /// 尝试立即接收值
@@ -539,6 +628,71 @@ impl<T> Future for RecvFuture<T> {
     }
 }
 
+/// 超时接收 Future
+pub struct RecvTimeoutFuture<'a, T> {
+    receiver: &'a mut Receiver<T>,
+    deadline: std::time::Instant,
+}
+
+impl<T> Future for RecvTimeoutFuture<'_, T> {
+    type Output = Result<T, RecvTimeoutError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        let mut guard = this.receiver.shared.lock();
+
+        if let Some(value) = guard.inner_mut().queue.pop_front() {
+            if let Some(waker) = guard.inner_mut().send_wakers.pop_front() {
+                waker.wake();
+            }
+            guard.broadcast();
+            return Poll::Ready(Ok(value));
+        }
+
+        if guard.inner().sender_count == 0 {
+            return Poll::Ready(Err(RecvTimeoutError::Closed));
+        }
+
+        if std::time::Instant::now() >= this.deadline {
+            return Poll::Ready(Err(RecvTimeoutError::Timeout));
+        }
+
+        guard.inner_mut().recv_waker = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
+/// 无界 mpsc 超时接收 Future
+pub struct UnboundedRecvTimeoutFuture<'a, T> {
+    receiver: &'a mut UnboundedReceiver<T>,
+    deadline: std::time::Instant,
+}
+
+impl<T> Future for UnboundedRecvTimeoutFuture<'_, T> {
+    type Output = Result<T, RecvTimeoutError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        let mut guard = this.receiver.shared.lock();
+
+        if let Some(value) = guard.inner_mut().queue.pop_front() {
+            guard.broadcast();
+            return Poll::Ready(Ok(value));
+        }
+
+        if guard.inner().sender_count == 0 {
+            return Poll::Ready(Err(RecvTimeoutError::Closed));
+        }
+
+        if std::time::Instant::now() >= this.deadline {
+            return Poll::Ready(Err(RecvTimeoutError::Timeout));
+        }
+
+        guard.inner_mut().recv_waker = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
 /// 无界 mpsc channel 的发送端
 ///
 /// 可以克隆以创建多个发送者
@@ -627,6 +781,17 @@ impl<T> UnboundedReceiver<T> {
             shared: self.shared.clone(),
         }
         .await
+    }
+
+    /// Receives a value, waiting at most `timeout`.
+    pub fn recv_timeout(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> UnboundedRecvTimeoutFuture<'_, T> {
+        UnboundedRecvTimeoutFuture {
+            receiver: self,
+            deadline: std::time::Instant::now() + timeout,
+        }
     }
 
     /// 尝试立即接收值

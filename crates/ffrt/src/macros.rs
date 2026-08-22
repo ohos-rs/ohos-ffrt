@@ -269,4 +269,56 @@ macro_rules! select {
             .await
         }
     }};
+
+    ($pat1:pat = $fut1:expr => $handler1:expr, $pat2:pat = $fut2:expr => $handler2:expr, $pat3:pat = $fut3:expr => $handler3:expr $(,)?) => {{
+        async move {
+            let mut fut1 = ::std::pin::pin!(Some($fut1));
+            let mut fut2 = ::std::pin::pin!(Some($fut2));
+            let mut fut3 = ::std::pin::pin!(Some($fut3));
+
+            ::std::future::poll_fn(|cx| {
+                {
+                    let future = unsafe { fut1.as_mut().get_unchecked_mut() }
+                        .as_mut()
+                        .expect("select future missing");
+                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
+                    match ::std::future::Future::poll(pinned, cx) {
+                        ::std::task::Poll::Ready($pat1) => {
+                            return ::std::task::Poll::Ready($handler1);
+                        }
+                        ::std::task::Poll::Pending => {}
+                    }
+                }
+
+                {
+                    let future = unsafe { fut2.as_mut().get_unchecked_mut() }
+                        .as_mut()
+                        .expect("select future missing");
+                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
+                    match ::std::future::Future::poll(pinned, cx) {
+                        ::std::task::Poll::Ready($pat2) => {
+                            return ::std::task::Poll::Ready($handler2);
+                        }
+                        ::std::task::Poll::Pending => {}
+                    }
+                }
+
+                {
+                    let future = unsafe { fut3.as_mut().get_unchecked_mut() }
+                        .as_mut()
+                        .expect("select future missing");
+                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
+                    match ::std::future::Future::poll(pinned, cx) {
+                        ::std::task::Poll::Ready($pat3) => {
+                            return ::std::task::Poll::Ready($handler3);
+                        }
+                        ::std::task::Poll::Pending => {}
+                    }
+                }
+
+                ::std::task::Poll::Pending
+            })
+            .await
+        }
+    }};
 }

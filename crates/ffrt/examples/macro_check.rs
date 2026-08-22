@@ -18,6 +18,14 @@ pub async fn g() {
     }
     .await;
     let _ = value;
+
+    let value3 = select! {
+        v = async { 1 } => v,
+        _ = async { 2 } => 0,
+        _ = async { 3 } => -1,
+    }
+    .await;
+    let _ = value3;
 }
 
 pub async fn h() {

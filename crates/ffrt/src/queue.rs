@@ -200,6 +200,10 @@ unsafe impl Send for Queue {}
 unsafe impl Sync for Queue {}
 
 impl Queue {
+    pub(crate) fn as_raw(&self) -> ffrt_queue_t {
+        self.inner
+    }
+
     /// Creates an FFRT queue.
     pub fn new(queue_type: QueueType, name: &str, attr: Option<&QueueAttr>) -> Self {
         let name = CString::new(name).expect("queue name must not contain NUL");
