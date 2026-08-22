@@ -2,6 +2,7 @@
 
 mod macros;
 
+pub mod fs;
 pub mod lock;
 pub mod looper;
 pub mod queue;

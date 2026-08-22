@@ -178,6 +178,7 @@ struct Inner<T> {
     receiver_alive: bool,
     recv_waker: Option<Waker>,
     send_wakers: VecDeque<Waker>,
+    close_waiters: VecDeque<Waker>,
 }
 
 /// 基于 FFRT 同步原语的共享状态
@@ -212,6 +213,7 @@ impl<T> Shared<T> {
                 receiver_alive: true,
                 recv_waker: None,
                 send_wakers: VecDeque::new(),
+                close_waiters: VecDeque::new(),
             }),
         }
     }
@@ -371,6 +373,13 @@ impl<T> Sender<T> {
         !guard.inner().receiver_alive
     }
 
+    /// Waits until the receiver is closed.
+    pub fn closed(&mut self) -> SenderClosedFuture<T> {
+        SenderClosedFuture {
+            shared: self.shared.clone(),
+        }
+    }
+
     /// 获取当前队列中的消息数量
     pub fn len(&self) -> usize {
         let guard = self.shared.lock();
@@ -489,6 +498,28 @@ impl<T> Future for SendTimeoutFuture<T> {
     }
 }
 
+/// Future returned by mpsc sender `closed` methods.
+pub struct SenderClosedFuture<T> {
+    shared: Arc<Shared<T>>,
+}
+
+impl<T> Future for SenderClosedFuture<T> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut guard = self.shared.lock();
+        if !guard.inner().receiver_alive {
+            Poll::Ready(())
+        } else {
+            guard
+                .inner_mut()
+                .close_waiters
+                .push_back(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
+
 /// 有界 mpsc channel 的接收端
 pub struct Receiver<T> {
     shared: Arc<Shared<T>>,
@@ -511,6 +542,27 @@ impl<T> Receiver<T> {
             receiver: self,
             deadline: std::time::Instant::now() + timeout,
         }
+    }
+
+    /// Receives at least one value and drains up to `limit` available values.
+    pub async fn recv_many(&mut self, buffer: &mut Vec<T>, limit: usize) -> usize {
+        if limit == 0 {
+            return 0;
+        }
+
+        match self.recv().await {
+            Some(value) => buffer.push(value),
+            None => return 0,
+        }
+
+        while buffer.len() < limit {
+            match self.try_recv() {
+                Ok(value) => buffer.push(value),
+                Err(_) => break,
+            }
+        }
+
+        buffer.len()
     }
 
     /// 尝试立即接收值
@@ -563,6 +615,9 @@ impl<T> Receiver<T> {
     pub fn close(&mut self) {
         let mut guard = self.shared.lock();
         guard.inner_mut().receiver_alive = false;
+        while let Some(waker) = guard.inner_mut().close_waiters.pop_front() {
+            waker.wake();
+        }
 
         // 唤醒所有等待的发送者
         while let Some(waker) = guard.inner_mut().send_wakers.pop_front() {
@@ -588,6 +643,9 @@ impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
         let mut guard = self.shared.lock();
         guard.inner_mut().receiver_alive = false;
+        while let Some(waker) = guard.inner_mut().close_waiters.pop_front() {
+            waker.wake();
+        }
 
         // 唤醒所有等待的发送者
         while let Some(waker) = guard.inner_mut().send_wakers.pop_front() {
@@ -728,6 +786,13 @@ impl<T> UnboundedSender<T> {
         !guard.inner().receiver_alive
     }
 
+    /// Waits until the receiver is closed.
+    pub fn closed(&mut self) -> SenderClosedFuture<T> {
+        SenderClosedFuture {
+            shared: self.shared.clone(),
+        }
+    }
+
     /// 获取当前队列中的消息数量
     pub fn len(&self) -> usize {
         let guard = self.shared.lock();
@@ -794,6 +859,27 @@ impl<T> UnboundedReceiver<T> {
         }
     }
 
+    /// Receives at least one value and drains up to `limit` available values.
+    pub async fn recv_many(&mut self, buffer: &mut Vec<T>, limit: usize) -> usize {
+        if limit == 0 {
+            return 0;
+        }
+
+        match self.recv().await {
+            Some(value) => buffer.push(value),
+            None => return 0,
+        }
+
+        while buffer.len() < limit {
+            match self.try_recv() {
+                Ok(value) => buffer.push(value),
+                Err(_) => break,
+            }
+        }
+
+        buffer.len()
+    }
+
     /// 尝试立即接收值
     ///
     /// 如果队列为空，立即返回错误
@@ -836,6 +922,9 @@ impl<T> UnboundedReceiver<T> {
     pub fn close(&mut self) {
         let mut guard = self.shared.lock();
         guard.inner_mut().receiver_alive = false;
+        while let Some(waker) = guard.inner_mut().close_waiters.pop_front() {
+            waker.wake();
+        }
         guard.broadcast();
     }
 
@@ -855,6 +944,9 @@ impl<T> Drop for UnboundedReceiver<T> {
     fn drop(&mut self) {
         let mut guard = self.shared.lock();
         guard.inner_mut().receiver_alive = false;
+        while let Some(waker) = guard.inner_mut().close_waiters.pop_front() {
+            waker.wake();
+        }
         guard.broadcast();
     }
 }
