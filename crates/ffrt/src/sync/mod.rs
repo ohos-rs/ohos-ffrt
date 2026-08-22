@@ -12,8 +12,14 @@ pub mod watch;
 pub use crate::signal::*;
 
 pub use barrier::{Barrier, BarrierWaitResult};
-pub use mutex::{Mutex, MutexGuard, TryLockError};
+pub use mutex::{Mutex, MutexGuard, OwnedMutexGuard, OwnedMutexLockFuture, TryLockError};
 pub use notify::Notify;
 pub use once_cell::{GetOrInitFuture, GetOrTryInitFuture, OnceCell, SetError};
-pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-pub use semaphore::{Acquire, AcquireError, Semaphore, SemaphorePermit, TryAcquireError};
+pub use rwlock::{
+    OwnedRwLockReadFuture, OwnedRwLockReadGuard, OwnedRwLockWriteFuture, OwnedRwLockWriteGuard,
+    RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
+pub use semaphore::{
+    Acquire, AcquireError, AcquireOwned, OwnedSemaphorePermit, Semaphore, SemaphorePermit,
+    TryAcquireError,
+};

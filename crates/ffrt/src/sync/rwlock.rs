@@ -4,6 +4,7 @@ use std::fmt;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use crate::lock::Mutex as FfrtMutex;
@@ -68,6 +69,38 @@ impl<T> RwLock<T> {
         RwLockWriteFuture { lock: self }
     }
 
+    /// Acquires an owned read guard from an [`Arc`] lock.
+    pub fn read_owned(self: Arc<Self>) -> OwnedRwLockReadFuture<T> {
+        OwnedRwLockReadFuture { lock: self }
+    }
+
+    /// Acquires an owned write guard from an [`Arc`] lock.
+    pub fn write_owned(self: Arc<Self>) -> OwnedRwLockWriteFuture<T> {
+        OwnedRwLockWriteFuture { lock: self }
+    }
+
+    /// Attempts to acquire an owned read guard without waiting.
+    pub fn try_read_owned(self: Arc<Self>) -> Result<OwnedRwLockReadGuard<T>, TryLockError> {
+        let mut state = self.state.lock().map_err(|_| TryLockError)?;
+        if state.writer {
+            return Err(TryLockError);
+        }
+        state.readers += 1;
+        drop(state);
+        Ok(OwnedRwLockReadGuard { lock: self })
+    }
+
+    /// Attempts to acquire an owned write guard without waiting.
+    pub fn try_write_owned(self: Arc<Self>) -> Result<OwnedRwLockWriteGuard<T>, TryLockError> {
+        let mut state = self.state.lock().map_err(|_| TryLockError)?;
+        if state.writer || state.readers != 0 {
+            return Err(TryLockError);
+        }
+        state.writer = true;
+        drop(state);
+        Ok(OwnedRwLockWriteGuard { lock: self })
+    }
+
     /// Acquires a read lock synchronously.
     pub fn blocking_read(&self) -> RwLockReadGuard<'_, T> {
         loop {
@@ -91,6 +124,48 @@ impl<T> RwLock<T> {
     /// Consumes the lock and returns its inner value.
     pub fn into_inner(self) -> T {
         self.value.into_inner()
+    }
+
+    fn register_waiter(state: &mut RwLockState, waker: &Waker) {
+        if let Some(existing) = state
+            .waiters
+            .iter_mut()
+            .find(|existing| existing.will_wake(waker))
+        {
+            *existing = waker.clone();
+        } else {
+            state.waiters.push_back(waker.clone());
+        }
+    }
+
+    fn wake_waiters(state: &mut RwLockState) -> Vec<Waker> {
+        state.waiters.drain(..).collect()
+    }
+
+    fn release_read(&self) {
+        let waiters = {
+            let mut state = self.state.lock().unwrap();
+            state.readers -= 1;
+            if state.readers == 0 {
+                Self::wake_waiters(&mut state)
+            } else {
+                Vec::new()
+            }
+        };
+        for waker in waiters {
+            waker.wake();
+        }
+    }
+
+    fn release_write(&self) {
+        let waiters = {
+            let mut state = self.state.lock().unwrap();
+            state.writer = false;
+            Self::wake_waiters(&mut state)
+        };
+        for waker in waiters {
+            waker.wake();
+        }
     }
 }
 
@@ -127,7 +202,7 @@ impl<'a, T> Future for RwLockReadFuture<'a, T> {
             return Poll::Ready(RwLockReadGuard { lock: this.lock });
         }
 
-        state.waiters.push_back(cx.waker().clone());
+        RwLock::<T>::register_waiter(&mut state, cx.waker());
         Poll::Pending
     }
 }
@@ -150,7 +225,55 @@ impl<'a, T> Future for RwLockWriteFuture<'a, T> {
             return Poll::Ready(RwLockWriteGuard { lock: this.lock });
         }
 
-        state.waiters.push_back(cx.waker().clone());
+        RwLock::<T>::register_waiter(&mut state, cx.waker());
+        Poll::Pending
+    }
+}
+
+/// Future returned by [`RwLock::read_owned`].
+#[must_use = "futures do nothing unless polled"]
+pub struct OwnedRwLockReadFuture<T> {
+    lock: Arc<RwLock<T>>,
+}
+
+impl<T> Future for OwnedRwLockReadFuture<T> {
+    type Output = OwnedRwLockReadGuard<T>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let mut state = this.lock.state.lock().unwrap();
+        if !state.writer {
+            state.readers += 1;
+            drop(state);
+            return Poll::Ready(OwnedRwLockReadGuard {
+                lock: this.lock.clone(),
+            });
+        }
+        RwLock::<T>::register_waiter(&mut state, cx.waker());
+        Poll::Pending
+    }
+}
+
+/// Future returned by [`RwLock::write_owned`].
+#[must_use = "futures do nothing unless polled"]
+pub struct OwnedRwLockWriteFuture<T> {
+    lock: Arc<RwLock<T>>,
+}
+
+impl<T> Future for OwnedRwLockWriteFuture<T> {
+    type Output = OwnedRwLockWriteGuard<T>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let mut state = this.lock.state.lock().unwrap();
+        if !state.writer && state.readers == 0 {
+            state.writer = true;
+            drop(state);
+            return Poll::Ready(OwnedRwLockWriteGuard {
+                lock: this.lock.clone(),
+            });
+        }
+        RwLock::<T>::register_waiter(&mut state, cx.waker());
         Poll::Pending
     }
 }
@@ -170,18 +293,7 @@ impl<T> Deref for RwLockReadGuard<'_, T> {
 
 impl<T> Drop for RwLockReadGuard<'_, T> {
     fn drop(&mut self) {
-        let mut state = self.lock.state.lock().unwrap();
-        state.readers -= 1;
-        let waker = if state.readers == 0 {
-            state.waiters.pop_front()
-        } else {
-            None
-        };
-        drop(state);
-
-        if let Some(waker) = waker {
-            waker.wake();
-        }
+        self.lock.release_read();
     }
 }
 
@@ -206,14 +318,51 @@ impl<T> DerefMut for RwLockWriteGuard<'_, T> {
 
 impl<T> Drop for RwLockWriteGuard<'_, T> {
     fn drop(&mut self) {
-        let mut state = self.lock.state.lock().unwrap();
-        state.writer = false;
-        let waker = state.waiters.pop_front();
-        drop(state);
+        self.lock.release_write();
+    }
+}
 
-        if let Some(waker) = waker {
-            waker.wake();
-        }
+/// An owned read guard returned by [`RwLock::read_owned`].
+pub struct OwnedRwLockReadGuard<T> {
+    lock: Arc<RwLock<T>>,
+}
+
+impl<T> Deref for OwnedRwLockReadGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.lock.value.get() }
+    }
+}
+
+impl<T> Drop for OwnedRwLockReadGuard<T> {
+    fn drop(&mut self) {
+        self.lock.release_read();
+    }
+}
+
+/// An owned write guard returned by [`RwLock::write_owned`].
+pub struct OwnedRwLockWriteGuard<T> {
+    lock: Arc<RwLock<T>>,
+}
+
+impl<T> Deref for OwnedRwLockWriteGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.lock.value.get() }
+    }
+}
+
+impl<T> DerefMut for OwnedRwLockWriteGuard<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.lock.value.get() }
+    }
+}
+
+impl<T> Drop for OwnedRwLockWriteGuard<T> {
+    fn drop(&mut self) {
+        self.lock.release_write();
     }
 }
 
@@ -232,6 +381,21 @@ mod tests {
             let mut write = lock.write().await;
             *write += 1;
             assert_eq!(*write, 2);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn owned_read_and_write() {
+        let lock = Arc::new(RwLock::new(3));
+        let result = crate::Runtime::new().block_on(async move {
+            let read = lock.clone().read_owned().await;
+            assert_eq!(*read, 3);
+            drop(read);
+            let mut write = lock.write_owned().await;
+            *write = 4;
+            assert_eq!(*write, 4);
             Ok::<(), crate::RuntimeError>(())
         });
         assert!(result.is_ok());

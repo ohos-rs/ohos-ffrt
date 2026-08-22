@@ -4,6 +4,7 @@ use std::fmt;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use crate::lock::Mutex as FfrtMutex;
@@ -49,6 +50,22 @@ impl<T> Mutex<T> {
         MutexLockFuture { mutex: self }
     }
 
+    /// Acquires an owned guard from an [`Arc`] mutex.
+    pub fn lock_owned(self: Arc<Self>) -> OwnedMutexLockFuture<T> {
+        OwnedMutexLockFuture { mutex: self }
+    }
+
+    /// Attempts to acquire an owned guard without waiting.
+    pub fn try_lock_owned(self: Arc<Self>) -> Result<OwnedMutexGuard<T>, TryLockError> {
+        let mut state = self.state.lock().map_err(|_| TryLockError)?;
+        if state.locked {
+            return Err(TryLockError);
+        }
+        state.locked = true;
+        drop(state);
+        Ok(OwnedMutexGuard { mutex: self })
+    }
+
     /// Acquires the lock synchronously.
     pub fn blocking_lock(&self) -> MutexGuard<'_, T> {
         loop {
@@ -62,6 +79,29 @@ impl<T> Mutex<T> {
     /// Consumes the mutex and returns its inner value.
     pub fn into_inner(self) -> T {
         self.value.into_inner()
+    }
+
+    fn register_waiter(state: &mut MutexState, waker: &Waker) {
+        if let Some(existing) = state
+            .waiters
+            .iter_mut()
+            .find(|existing| existing.will_wake(waker))
+        {
+            *existing = waker.clone();
+        } else {
+            state.waiters.push_back(waker.clone());
+        }
+    }
+
+    fn unlock(&self) {
+        let waiters = {
+            let mut state = self.state.lock().unwrap();
+            state.locked = false;
+            state.waiters.drain(..).collect::<Vec<_>>()
+        };
+        for waker in waiters {
+            waker.wake();
+        }
     }
 }
 
@@ -110,7 +150,31 @@ impl<'a, T> Future for MutexLockFuture<'a, T> {
             return Poll::Ready(MutexGuard { mutex: this.mutex });
         }
 
-        state.waiters.push_back(cx.waker().clone());
+        Mutex::<T>::register_waiter(&mut state, cx.waker());
+        Poll::Pending
+    }
+}
+
+/// Future returned by [`Mutex::lock_owned`].
+#[must_use = "futures do nothing unless polled"]
+pub struct OwnedMutexLockFuture<T> {
+    mutex: Arc<Mutex<T>>,
+}
+
+impl<T> Future for OwnedMutexLockFuture<T> {
+    type Output = OwnedMutexGuard<T>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let mut state = this.mutex.state.lock().unwrap();
+        if !state.locked {
+            state.locked = true;
+            drop(state);
+            return Poll::Ready(OwnedMutexGuard {
+                mutex: this.mutex.clone(),
+            });
+        }
+        Mutex::<T>::register_waiter(&mut state, cx.waker());
         Poll::Pending
     }
 }
@@ -136,14 +200,32 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        let mut state = self.mutex.state.lock().unwrap();
-        state.locked = false;
-        let waker = state.waiters.pop_front();
-        drop(state);
+        self.mutex.unlock();
+    }
+}
 
-        if let Some(waker) = waker {
-            waker.wake();
-        }
+/// An owned guard returned by [`Mutex::lock_owned`].
+pub struct OwnedMutexGuard<T> {
+    mutex: Arc<Mutex<T>>,
+}
+
+impl<T> Deref for OwnedMutexGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.mutex.value.get() }
+    }
+}
+
+impl<T> DerefMut for OwnedMutexGuard<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.mutex.value.get() }
+    }
+}
+
+impl<T> Drop for OwnedMutexGuard<T> {
+    fn drop(&mut self) {
+        self.mutex.unlock();
     }
 }
 
@@ -170,5 +252,17 @@ mod tests {
         assert!(mutex.try_lock().is_err());
         drop(guard);
         assert!(mutex.try_lock().is_ok());
+    }
+
+    #[test]
+    fn owned_guard_outlives_source_binding() {
+        let mutex = Arc::new(Mutex::new(1));
+        let result = crate::Runtime::new().block_on(async move {
+            let mut guard = mutex.lock_owned().await;
+            *guard += 1;
+            assert_eq!(*guard, 2);
+            Ok::<(), crate::RuntimeError>(())
+        });
+        assert!(result.is_ok());
     }
 }

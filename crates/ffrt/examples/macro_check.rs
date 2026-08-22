@@ -26,6 +26,27 @@ pub async fn g() {
     }
     .await;
     let _ = value3;
+
+    let many = select! {
+        biased;
+        value = async { 1 } => value,
+        value = async { 2 } => value,
+        value = async { 3 } => value,
+        value = async { 4 } => value,
+        value = async { 5 } => value,
+        value = async { 6 } => value,
+    }
+    .await;
+    assert_eq!(many, 1);
+
+    let shared = String::from("shared");
+    let shared_len = select! {
+        biased;
+        _ = async {} => shared.len(),
+        _ = async {} => shared.len(),
+    }
+    .await;
+    assert_eq!(shared_len, 6);
 }
 
 pub async fn local_demo() {

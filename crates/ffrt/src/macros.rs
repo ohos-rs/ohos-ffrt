@@ -1,3 +1,23 @@
+/// Declares one or more scoped task-local keys.
+#[macro_export]
+macro_rules! task_local {
+    () => {};
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $ty:ty; $($rest:tt)*) => {
+        $(#[$attr])*
+        $vis static $name: $crate::task::LocalKey<$ty> = {
+            fn __ffrt_task_local_get() -> *const $crate::task::LocalKeyInner<$ty> {
+                ::std::thread_local! {
+                    static VALUE: $crate::task::LocalKeyInner<$ty> =
+                        $crate::task::LocalKeyInner::new();
+                }
+                VALUE.with(|value| value as *const $crate::task::LocalKeyInner<$ty>)
+            }
+            $crate::task::LocalKey::new(__ffrt_task_local_get)
+        };
+        $crate::task_local! { $($rest)* }
+    };
+}
+
 /// Polls one future and stores its output when it becomes ready.
 ///
 /// This helper macro exists to keep the generated `join!`/`try_join!` code
@@ -210,119 +230,150 @@ macro_rules! pin {
 /// Polls futures and returns the handler of the first ready branch.
 #[macro_export]
 macro_rules! select {
-    (biased; $($branch:tt)*) => {
-        $crate::select!($($branch)*)
+    (biased; $($branches:tt)*) => {
+        $crate::select!(@dispatch biased; $($branches)*)
     };
 
-    ($pat1:pat = $fut1:expr => $handler1:expr $(,)?) => {{
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr,
+        $p3:pat = $f3:expr => $h3:expr,
+        $p4:pat = $f4:expr => $h4:expr,
+        $p5:pat = $f5:expr => $h5:expr,
+        $p6:pat = $f6:expr => $h6:expr,
+        $p7:pat = $f7:expr => $h7:expr,
+        $p8:pat = $f8:expr => $h8:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 8;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2),
+            (2, future3, $p3, $f3, $h3), (3, future4, $p4, $f4, $h4),
+            (4, future5, $p5, $f5, $h5), (5, future6, $p6, $f6, $h6),
+            (6, future7, $p7, $f7, $h7), (7, future8, $p8, $f8, $h8))
+    };
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr,
+        $p3:pat = $f3:expr => $h3:expr,
+        $p4:pat = $f4:expr => $h4:expr,
+        $p5:pat = $f5:expr => $h5:expr,
+        $p6:pat = $f6:expr => $h6:expr,
+        $p7:pat = $f7:expr => $h7:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 7;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2),
+            (2, future3, $p3, $f3, $h3), (3, future4, $p4, $f4, $h4),
+            (4, future5, $p5, $f5, $h5), (5, future6, $p6, $f6, $h6),
+            (6, future7, $p7, $f7, $h7))
+    };
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr,
+        $p3:pat = $f3:expr => $h3:expr,
+        $p4:pat = $f4:expr => $h4:expr,
+        $p5:pat = $f5:expr => $h5:expr,
+        $p6:pat = $f6:expr => $h6:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 6;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2),
+            (2, future3, $p3, $f3, $h3), (3, future4, $p4, $f4, $h4),
+            (4, future5, $p5, $f5, $h5), (5, future6, $p6, $f6, $h6))
+    };
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr,
+        $p3:pat = $f3:expr => $h3:expr,
+        $p4:pat = $f4:expr => $h4:expr,
+        $p5:pat = $f5:expr => $h5:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 5;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2),
+            (2, future3, $p3, $f3, $h3), (3, future4, $p4, $f4, $h4),
+            (4, future5, $p5, $f5, $h5))
+    };
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr,
+        $p3:pat = $f3:expr => $h3:expr,
+        $p4:pat = $f4:expr => $h4:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 4;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2),
+            (2, future3, $p3, $f3, $h3), (3, future4, $p4, $f4, $h4))
+    };
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr,
+        $p3:pat = $f3:expr => $h3:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 3;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2),
+            (2, future3, $p3, $f3, $h3))
+    };
+    (@dispatch $mode:ident;
+        $p1:pat = $f1:expr => $h1:expr,
+        $p2:pat = $f2:expr => $h2:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 2;
+            (0, future1, $p1, $f1, $h1), (1, future2, $p2, $f2, $h2))
+    };
+    (@dispatch $mode:ident; $p1:pat = $f1:expr => $h1:expr $(,)?) => {
+        $crate::__ffrt_select_run!($mode; 1; (0, future1, $p1, $f1, $h1))
+    };
+    (@dispatch $mode:ident; $($invalid:tt)*) => {
+        compile_error!("select! supports between one and eight branches")
+    };
+    ($($branches:tt)*) => {
+        $crate::select!(@dispatch fair; $($branches)*)
+    };
+}
+
+/// Implementation detail for [`select!`].
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __ffrt_select_run {
+    ($mode:ident; $count:expr; $(($index:pat, $name:ident, $pat:pat, $future:expr, $handler:expr)),+) => {{
         async move {
-            let mut fut1 = ::std::pin::pin!(Some($fut1));
-
-            ::std::future::poll_fn(|cx| {
-                let future = unsafe { fut1.as_mut().get_unchecked_mut() }
-                    .as_mut()
-                    .expect("select future missing");
-                let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
-                match ::std::future::Future::poll(pinned, cx) {
-                    ::std::task::Poll::Ready($pat1) => {
-                        return ::std::task::Poll::Ready($handler1);
+            $(let mut $name = ::std::pin::pin!(Some($future));)+
+            let mut active = $count;
+            let start = $crate::__ffrt_select_mode_start!($mode, $count);
+            ::std::future::poll_fn(move |cx| {
+                for offset in 0..$count {
+                    match (start + offset) % $count {
+                        $($index => {
+                            if $name.as_ref().get_ref().is_none() {
+                                continue;
+                            }
+                            let result = {
+                                let future = unsafe { $name.as_mut().get_unchecked_mut() }
+                                    .as_mut()
+                                    .expect("select future missing");
+                                let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
+                                ::std::future::Future::poll(pinned, cx)
+                            };
+                            if let ::std::task::Poll::Ready(output) = result {
+                                $name.as_mut().set(None);
+                                active -= 1;
+                                #[allow(unreachable_patterns)]
+                                match output {
+                                    $pat => return ::std::task::Poll::Ready($handler),
+                                    _ => {}
+                                }
+                            }
+                        },)+
+                        _ => unreachable!("select branch index out of range"),
                     }
-                    ::std::task::Poll::Pending => {}
                 }
-
+                if active == 0 {
+                    panic!("all select branches were disabled");
+                }
                 ::std::task::Poll::Pending
             })
             .await
         }
     }};
+}
 
-    ($pat1:pat = $fut1:expr => $handler1:expr, $pat2:pat = $fut2:expr => $handler2:expr $(,)?) => {{
-        async move {
-            let mut fut1 = ::std::pin::pin!(Some($fut1));
-            let mut fut2 = ::std::pin::pin!(Some($fut2));
-
-            ::std::future::poll_fn(|cx| {
-                {
-                    let future = unsafe { fut1.as_mut().get_unchecked_mut() }
-                        .as_mut()
-                        .expect("select future missing");
-                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
-                    match ::std::future::Future::poll(pinned, cx) {
-                        ::std::task::Poll::Ready($pat1) => {
-                            return ::std::task::Poll::Ready($handler1);
-                        }
-                        ::std::task::Poll::Pending => {}
-                    }
-                }
-
-                {
-                    let future = unsafe { fut2.as_mut().get_unchecked_mut() }
-                        .as_mut()
-                        .expect("select future missing");
-                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
-                    match ::std::future::Future::poll(pinned, cx) {
-                        ::std::task::Poll::Ready($pat2) => {
-                            return ::std::task::Poll::Ready($handler2);
-                        }
-                        ::std::task::Poll::Pending => {}
-                    }
-                }
-
-                ::std::task::Poll::Pending
-            })
-            .await
-        }
-    }};
-
-    ($pat1:pat = $fut1:expr => $handler1:expr, $pat2:pat = $fut2:expr => $handler2:expr, $pat3:pat = $fut3:expr => $handler3:expr $(,)?) => {{
-        async move {
-            let mut fut1 = ::std::pin::pin!(Some($fut1));
-            let mut fut2 = ::std::pin::pin!(Some($fut2));
-            let mut fut3 = ::std::pin::pin!(Some($fut3));
-
-            ::std::future::poll_fn(|cx| {
-                {
-                    let future = unsafe { fut1.as_mut().get_unchecked_mut() }
-                        .as_mut()
-                        .expect("select future missing");
-                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
-                    match ::std::future::Future::poll(pinned, cx) {
-                        ::std::task::Poll::Ready($pat1) => {
-                            return ::std::task::Poll::Ready($handler1);
-                        }
-                        ::std::task::Poll::Pending => {}
-                    }
-                }
-
-                {
-                    let future = unsafe { fut2.as_mut().get_unchecked_mut() }
-                        .as_mut()
-                        .expect("select future missing");
-                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
-                    match ::std::future::Future::poll(pinned, cx) {
-                        ::std::task::Poll::Ready($pat2) => {
-                            return ::std::task::Poll::Ready($handler2);
-                        }
-                        ::std::task::Poll::Pending => {}
-                    }
-                }
-
-                {
-                    let future = unsafe { fut3.as_mut().get_unchecked_mut() }
-                        .as_mut()
-                        .expect("select future missing");
-                    let pinned = unsafe { ::std::pin::Pin::new_unchecked(future) };
-                    match ::std::future::Future::poll(pinned, cx) {
-                        ::std::task::Poll::Ready($pat3) => {
-                            return ::std::task::Poll::Ready($handler3);
-                        }
-                        ::std::task::Poll::Pending => {}
-                    }
-                }
-
-                ::std::task::Poll::Pending
-            })
-            .await
-        }
-    }};
+/// Selects the first branch for biased or fair polling.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __ffrt_select_mode_start {
+    (biased, $count:expr) => {
+        0usize
+    };
+    (fair, $count:expr) => {
+        $crate::__select_start($count)
+    };
 }

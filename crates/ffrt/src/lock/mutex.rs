@@ -62,12 +62,23 @@ impl<T> Mutex<T> {
             ))),
         }
     }
+
+    /// Consumes the mutex and returns the protected value.
+    pub fn into_inner(self) -> T {
+        let this = std::mem::ManuallyDrop::new(self);
+        unsafe {
+            ffrt_mutex_destroy(this.inner.as_ptr());
+            drop(Box::from_raw(this.inner.as_ptr()));
+            this.data.get().read()
+        }
+    }
 }
 
 impl<T> Drop for Mutex<T> {
     fn drop(&mut self) {
         unsafe {
             ffrt_mutex_destroy(self.inner.as_ptr());
+            drop(Box::from_raw(self.inner.as_ptr()));
         }
     }
 }

@@ -3,20 +3,23 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 struct SemaphoreState {
     permits: usize,
     closed: bool,
+    next_waiter: u64,
     waiters: VecDeque<SemaphoreWaiter>,
 }
 
 struct SemaphoreWaiter {
+    id: u64,
     permits: usize,
     waker: Waker,
 }
 
-/// A tokio-style counting semaphore.
+/// A fair, tokio-style counting semaphore.
 pub struct Semaphore {
     state: Mutex<SemaphoreState>,
 }
@@ -28,6 +31,7 @@ impl Semaphore {
             state: Mutex::new(SemaphoreState {
                 permits,
                 closed: false,
+                next_waiter: 1,
                 waiters: VecDeque::new(),
             }),
         }
@@ -35,15 +39,19 @@ impl Semaphore {
 
     /// Returns the number of currently available permits.
     pub fn available_permits(&self) -> usize {
-        let state = self.state.lock().unwrap();
-        state.permits
+        self.state.lock().unwrap().permits
     }
 
     /// Adds `n` permits to the semaphore.
     pub fn add_permits(&self, n: usize) {
-        let mut state = self.state.lock().unwrap();
-        state.permits = state.permits.saturating_add(n);
-        Self::wake_waiters(&mut state);
+        let waker = {
+            let mut state = self.state.lock().unwrap();
+            state.permits = state.permits.saturating_add(n);
+            Self::next_waker(&state)
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
     }
 
     /// Reduces available permits by up to `n` and returns the number reduced.
@@ -56,48 +64,62 @@ impl Semaphore {
 
     /// Closes the semaphore. Waiting acquisitions fail with an error.
     pub fn close(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.closed = true;
-        while let Some(waiter) = state.waiters.pop_front() {
-            waiter.waker.wake();
+        let waiters = {
+            let mut state = self.state.lock().unwrap();
+            state.closed = true;
+            state
+                .waiters
+                .drain(..)
+                .map(|waiter| waiter.waker)
+                .collect::<Vec<_>>()
+        };
+        for waker in waiters {
+            waker.wake();
         }
     }
 
-    /// Returns `true` if the semaphore is closed.
+    /// Returns whether the semaphore is closed.
     pub fn is_closed(&self) -> bool {
-        let state = self.state.lock().unwrap();
-        state.closed
+        self.state.lock().unwrap().closed
     }
 
-    /// Acquires one permit.
+    /// Acquires one borrowed permit.
     pub fn acquire(&self) -> Acquire<'_> {
         self.acquire_many(1)
     }
 
-    /// Acquires `permits` permits.
+    /// Acquires several borrowed permits atomically.
     pub fn acquire_many(&self, permits: u32) -> Acquire<'_> {
         Acquire {
             semaphore: self,
             permits: permits as usize,
+            waiter: None,
         }
     }
 
-    /// Attempts to acquire one permit without waiting.
+    /// Acquires one owned permit from an [`Arc`] semaphore.
+    pub fn acquire_owned(self: Arc<Self>) -> AcquireOwned {
+        self.acquire_many_owned(1)
+    }
+
+    /// Acquires several owned permits from an [`Arc`] semaphore.
+    pub fn acquire_many_owned(self: Arc<Self>, permits: u32) -> AcquireOwned {
+        AcquireOwned {
+            semaphore: self,
+            permits: permits as usize,
+            waiter: None,
+        }
+    }
+
+    /// Attempts to acquire one borrowed permit without waiting.
     pub fn try_acquire(&self) -> Result<SemaphorePermit<'_>, TryAcquireError> {
         self.try_acquire_many(1)
     }
 
-    /// Attempts to acquire `permits` permits without waiting.
+    /// Attempts to acquire several borrowed permits without waiting.
     pub fn try_acquire_many(&self, permits: u32) -> Result<SemaphorePermit<'_>, TryAcquireError> {
-        let mut state = self.state.lock().unwrap();
-        if state.closed {
-            return Err(TryAcquireError::Closed);
-        }
         let permits = permits as usize;
-        if state.permits < permits {
-            return Err(TryAcquireError::NoPermits);
-        }
-        state.permits -= permits;
+        self.try_take(permits)?;
         Ok(SemaphorePermit {
             semaphore: self,
             permits,
@@ -105,23 +127,112 @@ impl Semaphore {
         })
     }
 
-    fn wake_waiters(state: &mut SemaphoreState) {
-        loop {
-            let permits = match state.waiters.front() {
-                Some(waiter) => waiter.permits,
-                None => return,
-            };
+    /// Attempts to acquire one owned permit without waiting.
+    pub fn try_acquire_owned(self: Arc<Self>) -> Result<OwnedSemaphorePermit, TryAcquireError> {
+        self.try_acquire_many_owned(1)
+    }
 
-            if state.permits < permits {
-                return;
+    /// Attempts to acquire several owned permits without waiting.
+    pub fn try_acquire_many_owned(
+        self: Arc<Self>,
+        permits: u32,
+    ) -> Result<OwnedSemaphorePermit, TryAcquireError> {
+        let permits = permits as usize;
+        self.try_take(permits)?;
+        Ok(OwnedSemaphorePermit {
+            semaphore: self,
+            permits,
+            forgotten: false,
+        })
+    }
+
+    fn try_take(&self, permits: usize) -> Result<(), TryAcquireError> {
+        let mut state = self.state.lock().unwrap();
+        if state.closed {
+            return Err(TryAcquireError::Closed);
+        }
+        if state.permits < permits {
+            return Err(TryAcquireError::NoPermits);
+        }
+        state.permits -= permits;
+        Ok(())
+    }
+
+    fn next_waker(state: &SemaphoreState) -> Option<Waker> {
+        state
+            .waiters
+            .front()
+            .filter(|waiter| state.permits >= waiter.permits)
+            .map(|waiter| waiter.waker.clone())
+    }
+
+    fn poll_acquire(
+        &self,
+        waiter_id: &mut Option<u64>,
+        permits: usize,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), AcquireError>> {
+        let mut state = self.state.lock().unwrap();
+        if state.closed {
+            *waiter_id = None;
+            return Poll::Ready(Err(AcquireError::closed()));
+        }
+
+        if let Some(id) = *waiter_id {
+            let position = state.waiters.iter().position(|waiter| waiter.id == id);
+            if position == Some(0) && state.permits >= permits {
+                state.waiters.pop_front();
+                state.permits -= permits;
+                *waiter_id = None;
+                let next = Self::next_waker(&state);
+                drop(state);
+                if let Some(waker) = next {
+                    waker.wake();
+                }
+                return Poll::Ready(Ok(()));
             }
 
-            let waiter = state
-                .waiters
-                .pop_front()
-                .expect("front waiter checked above");
+            if let Some(position) = position {
+                let queued = &mut state.waiters[position];
+                if !queued.waker.will_wake(cx.waker()) {
+                    queued.waker = cx.waker().clone();
+                }
+                return Poll::Pending;
+            }
+            // A close drains the queue, but that case returned above. Treat a
+            // missing waiter defensively as a fresh acquisition.
+            *waiter_id = None;
+        }
+
+        if state.waiters.is_empty() && state.permits >= permits {
             state.permits -= permits;
-            waiter.waker.wake();
+            return Poll::Ready(Ok(()));
+        }
+
+        let id = state.next_waiter;
+        state.next_waiter = state.next_waiter.wrapping_add(1).max(1);
+        state.waiters.push_back(SemaphoreWaiter {
+            id,
+            permits,
+            waker: cx.waker().clone(),
+        });
+        *waiter_id = Some(id);
+        Poll::Pending
+    }
+
+    fn cancel_waiter(&self, waiter_id: &mut Option<u64>) {
+        let Some(id) = waiter_id.take() else {
+            return;
+        };
+        let waker = {
+            let mut state = self.state.lock().unwrap();
+            if let Some(position) = state.waiters.iter().position(|waiter| waiter.id == id) {
+                state.waiters.remove(position);
+            }
+            Self::next_waker(&state)
+        };
+        if let Some(waker) = waker {
+            waker.wake();
         }
     }
 }
@@ -132,7 +243,7 @@ impl Default for Semaphore {
     }
 }
 
-/// A permit returned from a successful [`Semaphore`] acquisition.
+/// A borrowed permit returned by [`Semaphore::acquire`].
 pub struct SemaphorePermit<'a> {
     semaphore: &'a Semaphore,
     permits: usize,
@@ -140,6 +251,11 @@ pub struct SemaphorePermit<'a> {
 }
 
 impl SemaphorePermit<'_> {
+    /// Returns the number of represented permits.
+    pub fn num_permits(&self) -> usize {
+        self.permits
+    }
+
     /// Forgets the permit without returning it to the semaphore.
     pub fn forget(mut self) {
         self.forgotten = true;
@@ -154,11 +270,44 @@ impl Drop for SemaphorePermit<'_> {
     }
 }
 
+/// An owned permit returned by [`Semaphore::acquire_owned`].
+pub struct OwnedSemaphorePermit {
+    semaphore: Arc<Semaphore>,
+    permits: usize,
+    forgotten: bool,
+}
+
+impl OwnedSemaphorePermit {
+    /// Returns the number of represented permits.
+    pub fn num_permits(&self) -> usize {
+        self.permits
+    }
+
+    /// Forgets the permit without returning it to the semaphore.
+    pub fn forget(mut self) {
+        self.forgotten = true;
+    }
+
+    /// Returns the semaphore that issued this permit.
+    pub fn semaphore(&self) -> &Arc<Semaphore> {
+        &self.semaphore
+    }
+}
+
+impl Drop for OwnedSemaphorePermit {
+    fn drop(&mut self) {
+        if !self.forgotten {
+            self.semaphore.add_permits(self.permits);
+        }
+    }
+}
+
 /// Future returned by [`Semaphore::acquire`] and [`Semaphore::acquire_many`].
 #[must_use = "futures do nothing unless polled"]
 pub struct Acquire<'a> {
     semaphore: &'a Semaphore,
     permits: usize,
+    waiter: Option<u64>,
 }
 
 impl<'a> Future for Acquire<'a> {
@@ -166,27 +315,58 @@ impl<'a> Future for Acquire<'a> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let mut state = this.semaphore.state.lock().unwrap();
-
-        if state.closed {
-            return Poll::Ready(Err(AcquireError::closed()));
-        }
-
-        if state.permits >= this.permits {
-            state.permits -= this.permits;
-            Semaphore::wake_waiters(&mut state);
-            return Poll::Ready(Ok(SemaphorePermit {
+        match this
+            .semaphore
+            .poll_acquire(&mut this.waiter, this.permits, cx)
+        {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(SemaphorePermit {
                 semaphore: this.semaphore,
                 permits: this.permits,
                 forgotten: false,
-            }));
+            })),
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => Poll::Pending,
         }
+    }
+}
 
-        state.waiters.push_back(SemaphoreWaiter {
-            permits: this.permits,
-            waker: cx.waker().clone(),
-        });
-        Poll::Pending
+impl Drop for Acquire<'_> {
+    fn drop(&mut self) {
+        self.semaphore.cancel_waiter(&mut self.waiter);
+    }
+}
+
+/// Future returned by [`Semaphore::acquire_owned`].
+#[must_use = "futures do nothing unless polled"]
+pub struct AcquireOwned {
+    semaphore: Arc<Semaphore>,
+    permits: usize,
+    waiter: Option<u64>,
+}
+
+impl Future for AcquireOwned {
+    type Output = Result<OwnedSemaphorePermit, AcquireError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        match this
+            .semaphore
+            .poll_acquire(&mut this.waiter, this.permits, cx)
+        {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(OwnedSemaphorePermit {
+                semaphore: this.semaphore.clone(),
+                permits: this.permits,
+                forgotten: false,
+            })),
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for AcquireOwned {
+    fn drop(&mut self) {
+        self.semaphore.cancel_waiter(&mut self.waiter);
     }
 }
 
@@ -195,12 +375,12 @@ impl<'a> Future for Acquire<'a> {
 pub struct AcquireError(());
 
 impl AcquireError {
-    /// Returns `true` if the semaphore was closed.
+    /// Returns whether the semaphore was closed.
     pub fn is_closed(&self) -> bool {
         true
     }
 
-    pub(crate) fn closed() -> Self {
+    fn closed() -> Self {
         Self(())
     }
 }
@@ -213,7 +393,7 @@ impl fmt::Display for AcquireError {
 
 impl std::error::Error for AcquireError {}
 
-/// Error returned by the non-blocking semaphore acquisition methods.
+/// Error returned by non-blocking semaphore acquisition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TryAcquireError {
     /// The semaphore is closed.
@@ -241,6 +421,15 @@ mod tests {
     fn permits_are_returned_on_drop() {
         let semaphore = Semaphore::new(1);
         let permit = semaphore.try_acquire().unwrap();
+        assert_eq!(semaphore.available_permits(), 0);
+        drop(permit);
+        assert_eq!(semaphore.available_permits(), 1);
+    }
+
+    #[test]
+    fn owned_permit_returns_to_arc() {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let permit = semaphore.clone().try_acquire_owned().unwrap();
         assert_eq!(semaphore.available_permits(), 0);
         drop(permit);
         assert_eq!(semaphore.available_permits(), 1);

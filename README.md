@@ -9,6 +9,12 @@ The `ffrt` crate exposes tokio-style entry points such as `spawn`,
 and `sync::oneshot`. It still does not cover the full tokio feature set, so
 evaluate your use case before replacing tokio directly.
 
+The I/O layer uses an FFRT loop readiness reactor. It includes `AsyncFd`,
+non-blocking TCP/UDP types, `AsyncRead`/`AsyncWrite` extensions, `copy`,
+`split`, `BufReader`, and `BufWriter`. Synchronization includes owned mutex,
+rwlock, and semaphore guards; task-local values, Unix signals, and fair
+multi-branch `select!` are also available.
+
 ## Install
 
 ```bash
