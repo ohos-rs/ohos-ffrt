@@ -52,6 +52,12 @@ impl std::error::Error for RecvError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendError<T>(pub T);
 
+impl<T> SendError<T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<T> fmt::Display for SendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "watch channel has no receivers")
@@ -60,12 +66,31 @@ impl<T> fmt::Display for SendError<T> {
 
 impl<T: fmt::Debug> std::error::Error for SendError<T> {}
 
+/// Tokio-compatible error namespace.
+pub mod error {
+    pub use super::{RecvError, SendError};
+}
+
 /// The producing end of a watch channel.
 pub struct Sender<T> {
     shared: Arc<Mutex<WatchState<T>>>,
 }
 
 impl<T> Sender<T> {
+    /// Creates a sender without an initial receiver.
+    pub fn new(init: T) -> Self {
+        Self {
+            shared: Arc::new(Mutex::new(WatchState {
+                value: init,
+                version: 0,
+                senders: 1,
+                receivers: 0,
+                waiters: VecDeque::new(),
+                closed_waiters: VecDeque::new(),
+            })),
+        }
+    }
+
     /// Sends a new value, waking all waiting receivers.
     pub fn send(&self, value: T) -> Result<(), SendError<T>> {
         let mut state = self.shared.lock().unwrap();
@@ -82,18 +107,14 @@ impl<T> Sender<T> {
     }
 
     /// Sends a new value and returns the previous value.
-    pub fn send_replace(&self, value: T) -> Result<T, SendError<T>> {
+    pub fn send_replace(&self, value: T) -> T {
         let mut state = self.shared.lock().unwrap();
-        if state.receivers == 0 {
-            return Err(SendError(value));
-        }
-
         let old = std::mem::replace(&mut state.value, value);
         state.version = state.version.wrapping_add(1);
         while let Some(waker) = state.waiters.pop_front() {
             waker.wake();
         }
-        Ok(old)
+        old
     }
 
     /// Applies `func` to the current value and notifies receivers.
@@ -138,7 +159,10 @@ impl<T> Sender<T> {
     /// Borrows the current value.
     pub fn borrow(&self) -> Ref<'_, T> {
         let guard = self.shared.lock().unwrap();
-        Ref { guard: Some(guard) }
+        Ref {
+            guard: Some(guard),
+            has_changed: false,
+        }
     }
 
     /// Creates a new receiver that initially considers the current value seen.
@@ -157,6 +181,14 @@ impl<T> Sender<T> {
         state.receivers
     }
 
+    pub fn sender_count(&self) -> usize {
+        self.shared.lock().unwrap().senders
+    }
+
+    pub fn same_channel(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
+    }
+
     /// Returns `true` when all receivers have been dropped.
     pub fn is_closed(&self) -> bool {
         let state = self.shared.lock().unwrap();
@@ -164,7 +196,7 @@ impl<T> Sender<T> {
     }
 
     /// Waits until all receivers have been dropped.
-    pub fn closed(&mut self) -> Closed<'_, T> {
+    pub fn closed(&self) -> Closed<'_, T> {
         Closed { sender: self }
     }
 }
@@ -200,26 +232,45 @@ impl<T> Receiver<T> {
     /// Borrows the current value.
     pub fn borrow(&self) -> Ref<'_, T> {
         let guard = self.shared.lock().unwrap();
-        Ref { guard: Some(guard) }
+        let has_changed = guard.version != self.seen;
+        Ref {
+            guard: Some(guard),
+            has_changed,
+        }
     }
 
     /// Borrows the current value and marks it as seen.
     pub fn borrow_and_update(&mut self) -> Ref<'_, T> {
         let state = self.shared.lock().unwrap();
+        let has_changed = state.version != self.seen;
         self.seen = state.version;
-        Ref { guard: Some(state) }
+        Ref {
+            guard: Some(state),
+            has_changed,
+        }
     }
 
     /// Returns `true` if a new value is available that has not been seen.
-    pub fn has_changed(&self) -> bool {
+    pub fn has_changed(&self) -> Result<bool, RecvError> {
         let state = self.shared.lock().unwrap();
-        state.version != self.seen
+        if state.version != self.seen {
+            Ok(true)
+        } else if state.senders == 0 {
+            Err(RecvError)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Marks the current value as seen.
     pub fn mark_seen(&mut self) {
         let state = self.shared.lock().unwrap();
         self.seen = state.version;
+    }
+
+    /// Marks the current value as unchanged.
+    pub fn mark_unchanged(&mut self) {
+        self.mark_seen();
     }
 
     /// Marks the current value as unseen, so `changed` returns immediately.
@@ -249,6 +300,10 @@ impl<T> Receiver<T> {
         let state = self.shared.lock().unwrap();
         self.seen = state.version;
         state.version
+    }
+
+    pub fn same_channel(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
     }
 }
 
@@ -309,20 +364,29 @@ pub struct WaitFor<'a, T, F> {
     predicate: F,
 }
 
-impl<T, F> Future for WaitFor<'_, T, F>
+impl<'a, T, F> Future for WaitFor<'a, T, F>
 where
     F: FnMut(&T) -> bool,
 {
-    type Output = Result<(), RecvError>;
+    type Output = Result<Ref<'a, T>, RecvError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // SAFETY: `predicate` is pinned through `self` and never moved.
         let this = unsafe { self.get_unchecked_mut() };
         let mut state = this.receiver.shared.lock().unwrap();
 
+        let has_changed = state.version != this.receiver.seen;
         if (this.predicate)(&state.value) {
             this.receiver.seen = state.version;
-            return Poll::Ready(Ok(()));
+            let state = unsafe {
+                std::mem::transmute::<MutexGuard<'_, WatchState<T>>, MutexGuard<'a, WatchState<T>>>(
+                    state,
+                )
+            };
+            return Poll::Ready(Ok(Ref {
+                guard: Some(state),
+                has_changed,
+            }));
         }
 
         if state.senders == 0 {
@@ -337,7 +401,7 @@ where
 /// Future returned by [`Sender::closed`].
 #[must_use = "futures do nothing unless polled"]
 pub struct Closed<'a, T> {
-    sender: &'a mut Sender<T>,
+    sender: &'a Sender<T>,
 }
 
 impl<T> Future for Closed<'_, T> {
@@ -359,6 +423,13 @@ impl<T> Future for Closed<'_, T> {
 /// A guard that keeps the watch state locked while borrowing a value.
 pub struct Ref<'a, T> {
     guard: Option<MutexGuard<'a, WatchState<T>>>,
+    has_changed: bool,
+}
+
+impl<T> Ref<'_, T> {
+    pub fn has_changed(&self) -> bool {
+        self.has_changed
+    }
 }
 
 impl<T> Deref for Ref<'_, T> {
@@ -383,7 +454,7 @@ mod tests {
     fn send_and_changed() {
         let (tx, mut rx) = channel(1);
         tx.send(2).unwrap();
-        let result = crate::Runtime::new().block_on(async move {
+        let result = crate::Runtime::new().unwrap().block_on(async move {
             rx.changed().await.unwrap();
             assert_eq!(*rx.borrow(), 2);
             Ok::<(), crate::RuntimeError>(())
@@ -395,7 +466,7 @@ mod tests {
     fn wait_for_predicate() {
         let (tx, mut rx) = channel(1);
         tx.send(5).unwrap();
-        let result = crate::Runtime::new().block_on(async move {
+        let result = crate::Runtime::new().unwrap().block_on(async move {
             rx.wait_for(|value| *value >= 5).await.unwrap();
             Ok::<(), crate::RuntimeError>(())
         });

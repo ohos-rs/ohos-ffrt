@@ -110,7 +110,7 @@ mod tests {
     fn barrier_releases_all_tasks() {
         let barrier = Arc::new(Barrier::new(2));
         let b = barrier.clone();
-        let result = crate::Runtime::new().block_on(async move {
+        let result = crate::Runtime::new().unwrap().block_on(async move {
             let handle = crate::spawn(async move { b.wait().await });
 
             let mine = barrier.wait().await;

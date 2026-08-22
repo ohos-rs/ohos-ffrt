@@ -7,14 +7,15 @@ use ffrt_sys::{
     ffrt_alloc_auto_managed_function_storage_base, ffrt_error_t_ffrt_success,
     ffrt_function_header_t, ffrt_function_kind_t_ffrt_function_kind_queue, ffrt_get_current_queue,
     ffrt_get_main_queue, ffrt_queue_attr_destroy, ffrt_queue_attr_get_max_concurrency,
-    ffrt_queue_attr_get_qos, ffrt_queue_attr_get_thread_mode, ffrt_queue_attr_get_timeout,
-    ffrt_queue_attr_init, ffrt_queue_attr_set_max_concurrency, ffrt_queue_attr_set_qos,
-    ffrt_queue_attr_set_thread_mode, ffrt_queue_attr_set_timeout, ffrt_queue_attr_t,
-    ffrt_queue_cancel, ffrt_queue_create, ffrt_queue_destroy, ffrt_queue_submit,
+    ffrt_queue_attr_get_qos, ffrt_queue_attr_get_timeout, ffrt_queue_attr_init,
+    ffrt_queue_attr_set_max_concurrency, ffrt_queue_attr_set_qos, ffrt_queue_attr_set_timeout,
+    ffrt_queue_attr_t, ffrt_queue_cancel, ffrt_queue_create, ffrt_queue_destroy, ffrt_queue_submit,
     ffrt_queue_submit_h, ffrt_queue_t, ffrt_queue_type_t, ffrt_queue_type_t_ffrt_queue_concurrent,
     ffrt_queue_type_t_ffrt_queue_serial, ffrt_queue_wait, ffrt_task_handle_destroy,
     ffrt_task_handle_t,
 };
+#[cfg(feature = "api-20")]
+use ffrt_sys::{ffrt_queue_attr_get_thread_mode, ffrt_queue_attr_set_thread_mode};
 
 use crate::{Qos, TaskAttr};
 

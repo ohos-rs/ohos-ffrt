@@ -1,5 +1,10 @@
 //! OpenHarmony FFRT Runtime
 
+extern crate self as ffrt;
+
+#[cfg(feature = "macros")]
+pub use ffrt_macros::{main, test};
+
 mod macros;
 
 pub mod fs;
@@ -22,17 +27,17 @@ pub mod sync;
 pub mod time {
     pub use std::time::{Duration, Instant};
 
-    pub use crate::timer::r#async::sleep;
-    pub use crate::timer::r#async::sleep_until;
+    pub use crate::timer::Sleep;
+    pub use crate::timer::r#async::{sleep, sleep_until};
     pub use crate::timer::interval::{Interval, MissedTickBehavior, interval, interval_at};
     pub use crate::timer::sync::sleep as sleep_blocking;
-    pub use crate::timer::timeout::{Elapsed, timeout, timeout_at};
+    pub use crate::timer::timeout::{Elapsed, Timeout, timeout, timeout_at};
 }
 
 pub use lock::*;
 pub use runtime::*;
 pub use signal::*;
-pub use task::*;
+pub use task::{Qos, Task, TaskAttr, TaskLocalAccessError, TaskPriority};
 
 /// Returns a pseudo-random starting branch for the unbiased [`select!`] macro.
 #[doc(hidden)]

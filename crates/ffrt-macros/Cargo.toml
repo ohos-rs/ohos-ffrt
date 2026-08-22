@@ -1,0 +1,15 @@
+[package]
+name = "ffrt-macros"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Attribute macros for the OpenHarmony FFRT async runtime"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+proc-macro-crate = "3"
+quote = "1"
+syn = { version = "2", features = ["full"] }

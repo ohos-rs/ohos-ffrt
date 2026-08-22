@@ -30,7 +30,7 @@ pub fn spawn_local<
         }
     };
 
-    let runtime = Runtime::new();
+    let runtime = Runtime::new().expect("create FFRT runtime");
 
     let attr = attr.unwrap_or_default();
 

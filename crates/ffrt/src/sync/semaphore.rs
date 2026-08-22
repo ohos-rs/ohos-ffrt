@@ -1,4 +1,4 @@
-use crate::lock::Mutex;
+use crate::lock::LazyMutex;
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
@@ -21,14 +21,26 @@ struct SemaphoreWaiter {
 
 /// A fair, tokio-style counting semaphore.
 pub struct Semaphore {
-    state: Mutex<SemaphoreState>,
+    state: LazyMutex<SemaphoreState>,
 }
 
 impl Semaphore {
+    /// Maximum number of permits supported by a semaphore.
+    pub const MAX_PERMITS: usize = usize::MAX >> 3;
+
     /// Creates a semaphore with the given initial number of permits.
     pub fn new(permits: usize) -> Self {
+        Self::const_new(permits)
+    }
+
+    /// Creates a semaphore that can be used in a static.
+    pub const fn const_new(permits: usize) -> Self {
+        assert!(
+            permits <= Self::MAX_PERMITS,
+            "permits exceeds Semaphore::MAX_PERMITS"
+        );
         Self {
-            state: Mutex::new(SemaphoreState {
+            state: LazyMutex::new(SemaphoreState {
                 permits,
                 closed: false,
                 next_waiter: 1,
@@ -46,7 +58,11 @@ impl Semaphore {
     pub fn add_permits(&self, n: usize) {
         let waker = {
             let mut state = self.state.lock().unwrap();
-            state.permits = state.permits.saturating_add(n);
+            state.permits = state
+                .permits
+                .checked_add(n)
+                .filter(|permits| *permits <= Self::MAX_PERMITS)
+                .expect("permits exceeds Semaphore::MAX_PERMITS");
             Self::next_waker(&state)
         };
         if let Some(waker) = waker {
@@ -151,7 +167,7 @@ impl Semaphore {
         if state.closed {
             return Err(TryAcquireError::Closed);
         }
-        if state.permits < permits {
+        if !state.waiters.is_empty() || state.permits < permits {
             return Err(TryAcquireError::NoPermits);
         }
         state.permits -= permits;
@@ -260,6 +276,32 @@ impl SemaphorePermit<'_> {
     pub fn forget(mut self) {
         self.forgotten = true;
     }
+
+    /// Merges another permit issued by the same semaphore into this permit.
+    pub fn merge(&mut self, mut other: Self) {
+        assert!(
+            std::ptr::eq(self.semaphore, other.semaphore),
+            "cannot merge permits from different semaphores"
+        );
+        self.permits = self
+            .permits
+            .checked_add(other.permits)
+            .expect("semaphore permit count overflow");
+        other.permits = 0;
+    }
+
+    /// Splits off `n` permits, returning `None` when too few are held.
+    pub fn split(&mut self, n: usize) -> Option<SemaphorePermit<'_>> {
+        if n > self.permits {
+            return None;
+        }
+        self.permits -= n;
+        Some(SemaphorePermit {
+            semaphore: self.semaphore,
+            permits: n,
+            forgotten: false,
+        })
+    }
 }
 
 impl Drop for SemaphorePermit<'_> {
@@ -291,6 +333,32 @@ impl OwnedSemaphorePermit {
     /// Returns the semaphore that issued this permit.
     pub fn semaphore(&self) -> &Arc<Semaphore> {
         &self.semaphore
+    }
+
+    /// Merges another permit issued by the same semaphore into this permit.
+    pub fn merge(&mut self, mut other: Self) {
+        assert!(
+            Arc::ptr_eq(&self.semaphore, &other.semaphore),
+            "cannot merge permits from different semaphores"
+        );
+        self.permits = self
+            .permits
+            .checked_add(other.permits)
+            .expect("semaphore permit count overflow");
+        other.permits = 0;
+    }
+
+    /// Splits off `n` permits, returning `None` when too few are held.
+    pub fn split(&mut self, n: usize) -> Option<Self> {
+        if n > self.permits {
+            return None;
+        }
+        self.permits -= n;
+        Some(Self {
+            semaphore: self.semaphore.clone(),
+            permits: n,
+            forgotten: false,
+        })
     }
 }
 
@@ -448,7 +516,7 @@ mod tests {
     fn add_permits_and_acquire_async() {
         let semaphore = Semaphore::new(0);
         semaphore.add_permits(2);
-        let result = crate::Runtime::new().block_on(async move {
+        let result = crate::Runtime::new().unwrap().block_on(async move {
             let _p1 = semaphore.acquire().await.unwrap();
             let _p2 = semaphore.acquire().await.unwrap();
             Ok::<(), crate::RuntimeError>(())

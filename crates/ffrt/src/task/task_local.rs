@@ -162,17 +162,19 @@ mod tests {
 
     #[test]
     fn nested_scopes_restore_values() {
-        let result = crate::Runtime::new().block_on(REQUEST_ID.scope(7, async {
-            assert_eq!(REQUEST_ID.get(), 7);
-            REQUEST_ID
-                .scope(9, async {
-                    crate::task::yield_now().await;
-                    assert_eq!(REQUEST_ID.get(), 9);
-                })
-                .await;
-            assert_eq!(REQUEST_ID.get(), 7);
-            Ok::<(), crate::RuntimeError>(())
-        }));
+        let result = crate::Runtime::new()
+            .unwrap()
+            .block_on(REQUEST_ID.scope(7, async {
+                assert_eq!(REQUEST_ID.get(), 7);
+                REQUEST_ID
+                    .scope(9, async {
+                        crate::task::yield_now().await;
+                        assert_eq!(REQUEST_ID.get(), 9);
+                    })
+                    .await;
+                assert_eq!(REQUEST_ID.get(), 7);
+                Ok::<(), crate::RuntimeError>(())
+            }));
         assert!(result.is_ok());
     }
 }

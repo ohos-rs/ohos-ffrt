@@ -7,9 +7,38 @@ description = "FFRT async runtime bindings"
 
 [dependencies]
 ffrt-sys = { workspace = true }
+libc = { workspace = true }
+bytes = { workspace = true }
+ffrt-macros = { workspace = true, optional = true }
 
 [features]
 default = []
+full = [
+    "fs",
+    "io-std",
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+]
+fs = []
+io-std = []
+io-util = []
+macros = ["dep:ffrt-macros"]
+net = []
+process = []
+rt = []
+rt-multi-thread = ["rt"]
+signal = []
+sync = []
+test-util = ["time", "rt"]
+time = []
+tracing = []
 api-13 = []
 api-14 = ["api-13", "ffrt-sys/api-14"]
 api-15 = ["api-14", "ffrt-sys/api-15"]

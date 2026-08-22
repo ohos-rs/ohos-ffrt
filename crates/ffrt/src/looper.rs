@@ -1,6 +1,8 @@
 //! Safe wrappers around the FFRT event loop.
 
 use std::os::raw::{c_char, c_int, c_void};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ffrt_sys::{
     ffrt_loop_create, ffrt_loop_destroy, ffrt_loop_epoll_ctl, ffrt_loop_run, ffrt_loop_stop,
@@ -19,6 +21,8 @@ pub const EPOLL_CTL_MOD: c_int = 3;
 
 /// Data may be read.
 pub const EPOLLIN: u32 = 0x001;
+/// High-priority data may be read.
+pub const EPOLLPRI: u32 = 0x002;
 /// Data may be written.
 pub const EPOLLOUT: u32 = 0x004;
 /// Error condition.
@@ -71,44 +75,58 @@ impl Looper {
         if ret == 0 { Ok(()) } else { Err(ret) }
     }
 
-    /// Starts a timer on the loop.
-    pub fn timer_start<F>(&self, timeout_ms: u64, repeat: bool, func: F) -> LooperTimer
+    /// Tries to start a timer on the loop.
+    pub fn try_timer_start<F>(
+        &self,
+        timeout_ms: u64,
+        repeat: bool,
+        func: F,
+    ) -> Result<LooperTimer, c_int>
     where
         F: FnMut() + Send + 'static,
     {
-        struct TimerData<F> {
-            func: F,
-            repeat: bool,
-        }
-
-        unsafe extern "C" fn timer_cb<F: FnMut()>(data: *mut c_void) {
-            if data.is_null() {
-                return;
-            }
-
-            let mut timer_data = unsafe { Box::from_raw(data.cast::<TimerData<F>>()) };
-            (timer_data.func)();
-            if timer_data.repeat {
-                let _ = Box::into_raw(timer_data);
-            }
-        }
-
-        let data = Box::into_raw(Box::new(TimerData { func, repeat }));
+        let data = Arc::new(TimerData {
+            func: Mutex::new(Box::new(func)),
+            repeat,
+            registration_owned: AtomicBool::new(true),
+        });
+        // FFRT owns one strong reference until a one-shot callback fires or the
+        // registration is successfully stopped.
+        let callback_data = Arc::into_raw(data.clone());
 
         let handle = unsafe {
             ffrt_loop_timer_start(
                 self.inner,
                 timeout_ms,
-                data.cast::<c_void>(),
-                Some(timer_cb::<F>),
+                callback_data.cast_mut().cast::<c_void>(),
+                Some(timer_callback),
                 repeat,
             )
         };
 
-        LooperTimer {
+        if handle < 0 {
+            data.release_registration();
+            return Err(-1);
+        }
+
+        Ok(LooperTimer {
             looper: self.inner,
             inner: handle,
-        }
+            data,
+            active: true,
+        })
+    }
+
+    /// Starts a timer on the loop.
+    ///
+    /// Panics if FFRT cannot allocate the timer. Code that needs to surface the
+    /// allocation failure should use [`Looper::try_timer_start`].
+    pub fn timer_start<F>(&self, timeout_ms: u64, repeat: bool, func: F) -> LooperTimer
+    where
+        F: FnMut() + Send + 'static,
+    {
+        self.try_timer_start(timeout_ms, repeat, func)
+            .expect("failed to start FFRT loop timer")
     }
 }
 
@@ -122,19 +140,72 @@ impl Drop for Looper {
 pub struct LooperTimer {
     looper: ffrt_loop_t,
     inner: ffrt_timer_t,
+    data: Arc<TimerData>,
+    active: bool,
 }
 
 impl LooperTimer {
     /// Stops the timer.
     pub fn stop(&mut self) -> Result<(), c_int> {
+        if !self.active || !self.data.registration_owned.load(Ordering::Acquire) {
+            self.active = false;
+            return Ok(());
+        }
+
         let ret = unsafe { ffrt_loop_timer_stop(self.looper, self.inner) };
-        if ret == 0 { Ok(()) } else { Err(ret) }
+        if ret == 0 {
+            self.active = false;
+            self.data.release_registration();
+            Ok(())
+        } else if !self.data.registration_owned.load(Ordering::Acquire) {
+            self.active = false;
+            Ok(())
+        } else {
+            Err(ret)
+        }
     }
 }
 
 impl Drop for LooperTimer {
     fn drop(&mut self) {
-        let _ = unsafe { ffrt_loop_timer_stop(self.looper, self.inner) };
+        let _ = self.stop();
+    }
+}
+
+unsafe impl Send for LooperTimer {}
+unsafe impl Sync for LooperTimer {}
+
+struct TimerData {
+    func: Mutex<Box<dyn FnMut() + Send + 'static>>,
+    repeat: bool,
+    registration_owned: AtomicBool,
+}
+
+impl TimerData {
+    fn release_registration(&self) {
+        if self.registration_owned.swap(false, Ordering::AcqRel) {
+            // This balances the Arc::into_raw in try_timer_start. The caller
+            // holds another Arc while executing this method.
+            unsafe { Arc::decrement_strong_count(self as *const Self) };
+        }
+    }
+}
+
+unsafe extern "C" fn timer_callback(data: *mut c_void) {
+    if data.is_null() {
+        return;
+    }
+
+    let pointer = data.cast::<TimerData>();
+    // A temporary strong reference protects the callback against a concurrent
+    // successful timer_stop releasing FFRT's registration reference.
+    unsafe { Arc::increment_strong_count(pointer) };
+    let timer = unsafe { Arc::from_raw(pointer) };
+    if let Ok(mut func) = timer.func.lock() {
+        (func)();
+    }
+    if !timer.repeat {
+        timer.release_registration();
     }
 }
 

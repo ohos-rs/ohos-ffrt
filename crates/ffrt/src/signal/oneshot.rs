@@ -30,6 +30,29 @@ impl<T> std::fmt::Display for SendError<T> {
 
 impl<T: std::fmt::Debug> std::error::Error for SendError<T> {}
 
+/// Error returned by [`Receiver::try_recv`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TryRecvError {
+    Empty,
+    Closed,
+}
+
+impl std::fmt::Display for TryRecvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => f.write_str("channel empty"),
+            Self::Closed => f.write_str("channel closed"),
+        }
+    }
+}
+
+impl std::error::Error for TryRecvError {}
+
+/// Tokio-compatible error namespace.
+pub mod error {
+    pub use super::{RecvError, TryRecvError};
+}
+
 /// 创建一个新的 oneshot channel
 ///
 /// 返回一个 (Sender, Receiver) 对，只能发送一个值
@@ -68,7 +91,8 @@ struct Inner<T> {
     value: Option<T>,
     sender_alive: bool,
     receiver_alive: bool,
-    waker: Option<Waker>,
+    recv_waker: Option<Waker>,
+    close_waker: Option<Waker>,
 }
 
 /// 基于 FFRT 同步原语的共享状态
@@ -100,7 +124,8 @@ impl<T> Shared<T> {
                 value: None,
                 sender_alive: true,
                 receiver_alive: true,
-                waker: None,
+                recv_waker: None,
+                close_waker: None,
             }),
         }
     }
@@ -176,25 +201,26 @@ impl<T> Sender<T> {
     ///
     /// tx.send(42).unwrap();
     /// ```
-    pub fn send(mut self, value: T) -> Result<(), SendError<T>> {
+    pub fn send(mut self, value: T) -> Result<(), T> {
         if let Some(shared) = self.shared.take() {
             let mut guard = shared.lock();
 
             if !guard.inner().receiver_alive {
-                return Err(SendError(value));
+                return Err(value);
             }
 
             guard.inner_mut().value = Some(value);
+            guard.inner_mut().sender_alive = false;
 
-            // 唤醒等待的 waker
-            if let Some(waker) = guard.inner_mut().waker.take() {
+            // Wake the receiver without disturbing a concurrent `closed()` waiter.
+            if let Some(waker) = guard.inner_mut().recv_waker.take() {
                 waker.wake();
             }
 
             guard.broadcast();
             Ok(())
         } else {
-            Err(SendError(value))
+            Err(value)
         }
     }
 
@@ -217,6 +243,20 @@ impl<T> Sender<T> {
             .await
         }
     }
+
+    /// Polls until the receiver has closed.
+    pub fn poll_closed(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let Some(shared) = &self.shared else {
+            return Poll::Ready(());
+        };
+        let mut guard = shared.lock();
+        if !guard.inner().receiver_alive {
+            Poll::Ready(())
+        } else {
+            guard.inner_mut().close_waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
 }
 
 impl<T> Drop for Sender<T> {
@@ -225,7 +265,7 @@ impl<T> Drop for Sender<T> {
             let mut guard = shared.lock();
             guard.inner_mut().sender_alive = false;
 
-            if let Some(waker) = guard.inner_mut().waker.take() {
+            if let Some(waker) = guard.inner_mut().recv_waker.take() {
                 waker.wake();
             }
 
@@ -248,7 +288,7 @@ impl<T> Future for ClosedFuture<T> {
         if !guard.inner().receiver_alive {
             Poll::Ready(())
         } else {
-            guard.inner_mut().waker = Some(cx.waker().clone());
+            guard.inner_mut().close_waker = Some(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -281,17 +321,23 @@ impl<T> Receiver<T> {
     /// // 现在可以接收了
     /// assert_eq!(rx.try_recv().unwrap(), 42);
     /// ```
-    pub fn try_recv(&mut self) -> Result<T, RecvError> {
-        if let Some(shared) = &self.shared {
+    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        if let Some(shared) = self.shared.clone() {
             let mut guard = shared.lock();
 
             if let Some(value) = guard.inner_mut().value.take() {
+                drop(guard);
+                self.shared.take();
                 Ok(value)
+            } else if guard.inner().sender_alive {
+                Err(TryRecvError::Empty)
             } else {
-                Err(RecvError)
+                drop(guard);
+                self.shared.take();
+                Err(TryRecvError::Closed)
             }
         } else {
-            Err(RecvError)
+            Err(TryRecvError::Closed)
         }
     }
 
@@ -346,11 +392,24 @@ impl<T> Receiver<T> {
         }
     }
 
+    /// Returns whether this receiver has already yielded its final result.
+    pub fn is_terminated(&self) -> bool {
+        self.shared.is_none()
+    }
+
+    /// Returns whether no value is currently buffered.
+    pub fn is_empty(&self) -> bool {
+        self.shared.as_ref().is_none_or(|shared| {
+            let guard = shared.lock();
+            guard.inner().value.is_none()
+        })
+    }
+
     /// Wake any task currently waiting on this receiver.
     pub fn wake_waiter(&self) {
         if let Some(shared) = &self.shared {
             let mut guard = shared.lock();
-            if let Some(waker) = guard.inner_mut().waker.take() {
+            if let Some(waker) = guard.inner_mut().recv_waker.take() {
                 waker.wake();
             }
             guard.broadcast();
@@ -362,6 +421,9 @@ impl<T> Receiver<T> {
         if let Some(shared) = &self.shared {
             let mut guard = shared.lock();
             guard.inner_mut().receiver_alive = false;
+            if let Some(waker) = guard.inner_mut().close_waker.take() {
+                waker.wake();
+            }
             guard.broadcast();
         }
     }
@@ -371,18 +433,23 @@ impl<T> Future for Receiver<T> {
     type Output = Result<T, RecvError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(shared) = &self.shared {
+        let this = self.get_mut();
+        if let Some(shared) = this.shared.clone() {
             let mut guard = shared.lock();
 
             if let Some(value) = guard.inner_mut().value.take() {
+                drop(guard);
+                this.shared.take();
                 return Poll::Ready(Ok(value));
             }
 
             if !guard.inner().sender_alive {
+                drop(guard);
+                this.shared.take();
                 return Poll::Ready(Err(RecvError));
             }
 
-            guard.inner_mut().waker = Some(cx.waker().clone());
+            guard.inner_mut().recv_waker = Some(cx.waker().clone());
             Poll::Pending
         } else {
             Poll::Ready(Err(RecvError))
@@ -396,7 +463,7 @@ impl<T> Drop for Receiver<T> {
             let mut guard = shared.lock();
             guard.inner_mut().receiver_alive = false;
 
-            if let Some(waker) = guard.inner_mut().waker.take() {
+            if let Some(waker) = guard.inner_mut().close_waker.take() {
                 waker.wake();
             }
 

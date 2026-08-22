@@ -178,7 +178,7 @@ impl SignalDriver {
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     match self.reader.poll_read_ready(cx) {
-                        Poll::Ready(Ok(guard)) => {
+                        Poll::Ready(Ok(mut guard)) => {
                             guard.clear_ready();
                             continue;
                         }

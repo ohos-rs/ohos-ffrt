@@ -7,19 +7,25 @@ mod notify;
 mod once_cell;
 mod rwlock;
 mod semaphore;
+mod set_once;
 pub mod watch;
 
 pub use crate::signal::*;
 
 pub use barrier::{Barrier, BarrierWaitResult};
-pub use mutex::{Mutex, MutexGuard, OwnedMutexGuard, OwnedMutexLockFuture, TryLockError};
-pub use notify::Notify;
-pub use once_cell::{GetOrInitFuture, GetOrTryInitFuture, OnceCell, SetError};
+pub use mutex::{
+    MappedMutexGuard, Mutex, MutexGuard, OwnedMappedMutexGuard, OwnedMutexGuard,
+    OwnedMutexLockFuture, TryLockError,
+};
+pub use notify::{Notified, Notify, OwnedNotified};
+pub use once_cell::{OnceCell, SetError};
 pub use rwlock::{
-    OwnedRwLockReadFuture, OwnedRwLockReadGuard, OwnedRwLockWriteFuture, OwnedRwLockWriteGuard,
-    RwLock, RwLockReadGuard, RwLockWriteGuard,
+    OwnedRwLockMappedWriteGuard, OwnedRwLockReadFuture, OwnedRwLockReadGuard,
+    OwnedRwLockWriteFuture, OwnedRwLockWriteGuard, RwLock, RwLockMappedWriteGuard, RwLockReadGuard,
+    RwLockWriteGuard,
 };
 pub use semaphore::{
     Acquire, AcquireError, AcquireOwned, OwnedSemaphorePermit, Semaphore, SemaphorePermit,
     TryAcquireError,
 };
+pub use set_once::{SetOnce, SetOnceError};
