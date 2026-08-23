@@ -14,7 +14,9 @@ non-blocking TCP/UDP types, `AsyncRead`/`AsyncWrite` extensions, `copy`,
 `split`, `BufReader`, and `BufWriter`. Synchronization includes owned mutex,
 rwlock, and semaphore guards; task-local values, Unix signals, and fair
 `select!` with up to 64 branches are also available. Unix modules are compiled
-only for `target_env = "ohos"`.
+only for `target_env = "ohos"`. Enabling the `tracing` feature emits
+Tokio-schema task spawn/poll and waker lifecycle diagnostics and exposes the
+named `tokio::task::Builder` API for tracing ecosystem integration.
 
 ## Install
 

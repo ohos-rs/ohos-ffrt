@@ -1,4 +1,6 @@
 mod attr;
+#[cfg(feature = "tracing")]
+mod builder;
 pub mod coop;
 mod join_set;
 mod local_set;
@@ -8,6 +10,8 @@ mod task;
 mod task_local;
 
 pub use attr::*;
+#[cfg(feature = "tracing")]
+pub use builder::Builder;
 pub use join_set::{JoinNext, JoinNextWithId, JoinSet};
 pub use local_set::{LocalEnterGuard, LocalSet, RunUntil, spawn_local};
 pub use priority::*;

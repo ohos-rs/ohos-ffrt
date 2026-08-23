@@ -1,14 +1,14 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{AssertUnwindSafe, Location, catch_unwind};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
 use crate::lock::Mutex;
-use crate::runtime::{CancellationState, JoinHandle, Result as RuntimeResult};
+use crate::runtime::{CancellationState, JoinHandle, Result as RuntimeResult, TaskTrace};
 
 thread_local! {
     static CURRENT_LOCAL: Cell<*const LocalSet> = const { Cell::new(std::ptr::null()) };
@@ -21,10 +21,21 @@ struct LocalState {
 
 struct TaskWaker {
     state: Arc<LocalState>,
+    trace: TaskTrace,
 }
 
 impl Wake for TaskWaker {
     fn wake(self: Arc<Self>) {
+        self.trace.waker_event("waker.wake");
+        self.state.notified.store(true, Ordering::Release);
+        let mut guard = self.state.run_waker.lock().unwrap();
+        if let Some(waker) = guard.take() {
+            waker.wake();
+        }
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.trace.waker_event("waker.wake_by_ref");
         self.state.notified.store(true, Ordering::Release);
         let mut guard = self.state.run_waker.lock().unwrap();
         if let Some(waker) = guard.take() {
@@ -35,6 +46,7 @@ impl Wake for TaskWaker {
 
 struct LocalTask {
     future: Pin<Box<dyn Future<Output = ()> + 'static>>,
+    trace: TaskTrace,
 }
 
 struct LocalJoin<F: Future> {
@@ -95,19 +107,38 @@ impl LocalSet {
     }
 
     /// Spawns a non-`Send` future on this local set.
+    #[track_caller]
     pub fn spawn_local<F>(&self, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + 'static,
+        F::Output: 'static,
+    {
+        self.spawn_named(future, None)
+    }
+
+    #[track_caller]
+    pub(crate) fn spawn_named<F>(&self, future: F, name: Option<&str>) -> JoinHandle<F::Output>
     where
         F: Future + 'static,
         F::Output: 'static,
     {
         let (sender, handle) = crate::runtime::local_join_channel();
         let state = handle.abort_handle().state;
+        let trace = TaskTrace::new(
+            "task",
+            name,
+            state.id,
+            std::mem::size_of::<F>(),
+            None,
+            Location::caller(),
+        );
         self.tasks.borrow_mut().push_back(LocalTask {
             future: Box::pin(LocalJoin {
                 future: Box::pin(future),
                 sender: Some(sender),
                 state,
             }),
+            trace,
         });
         self.state.notified.store(true, Ordering::Release);
         if let Some(waker) = self.state.run_waker.lock().unwrap().take() {
@@ -155,9 +186,13 @@ impl LocalSet {
             };
             let task_waker = Waker::from(Arc::new(TaskWaker {
                 state: self.state.clone(),
+                trace: task.trace.clone(),
             }));
             let mut task_cx = Context::from_waker(&task_waker);
-            if task.future.as_mut().poll(&mut task_cx).is_pending() {
+            let poll = task
+                .trace
+                .in_scope(|| task.future.as_mut().poll(&mut task_cx));
+            if poll.is_pending() {
                 tasks.push_back(task);
             }
         }
@@ -238,7 +273,17 @@ impl Drop for LocalEnterGuard<'_> {
 }
 
 /// Spawns a non-`Send` future on the currently running [`LocalSet`].
+#[track_caller]
 pub fn spawn_local<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + 'static,
+    F::Output: 'static,
+{
+    spawn_local_named(future, None)
+}
+
+#[track_caller]
+pub(crate) fn spawn_local_named<F>(future: F, name: Option<&str>) -> JoinHandle<F::Output>
 where
     F: Future + 'static,
     F::Output: 'static,
@@ -246,7 +291,7 @@ where
     CURRENT_LOCAL.with(|current| {
         let local = current.get();
         assert!(!local.is_null(), "spawn_local called outside a LocalSet");
-        unsafe { (&*local).spawn_local(future) }
+        unsafe { (&*local).spawn_named(future, name) }
     })
 }
 

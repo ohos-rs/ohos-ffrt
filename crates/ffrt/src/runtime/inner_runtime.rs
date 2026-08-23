@@ -1,11 +1,12 @@
 use super::WakerState;
+use super::trace::TaskTrace;
 use crate::signal::oneshot;
 use crate::{JoinError, create_waker};
 use crate::{Task, TaskAttr};
 use ffrt_sys::ffrt_wait;
 use std::cell::Cell;
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{AssertUnwindSafe, Location, catch_unwind};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -108,25 +109,47 @@ impl Runtime {
     }
 
     /// Spawn a new task on the runtime
+    #[track_caller]
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.spawn_task(Task::default(), future)
+        self.spawn_named(future, None)
+    }
+
+    #[track_caller]
+    pub(crate) fn spawn_named<F>(&self, future: F, name: Option<&str>) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.spawn_task(Task::default(), future, name, Location::caller())
     }
 
     /// Spawn a new task with specified task attributes
+    #[track_caller]
     pub fn spawn_with_attr<F>(&self, attr: TaskAttr, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.spawn_task(Task::new(attr), future)
+        let name = attr.get_name().to_owned();
+        self.spawn_task(Task::new(attr), future, Some(&name), Location::caller())
     }
 
     /// Spawn a blocking closure on the runtime.
+    #[track_caller]
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_blocking_named(func, None)
+    }
+
+    #[track_caller]
+    pub(crate) fn spawn_blocking_named<F, R>(&self, func: F, name: Option<&str>) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -134,17 +157,27 @@ impl Runtime {
         let (tx, rx) = oneshot::channel();
         let state = CancellationState::new();
         let runner_state = state.clone();
+        let trace = TaskTrace::new(
+            "blocking",
+            name,
+            state.id,
+            std::mem::size_of::<F>(),
+            Some(std::any::type_name::<F>()),
+            Location::caller(),
+        );
         let task = Task::default();
         task.submit(move || {
             let _task_id = CurrentTaskIdGuard::enter(runner_state.id);
             // Tokio-compatible behavior: blocking work can only be cancelled
             // before it starts. Once the closure begins, abort has no effect.
-            let output = if runner_state.is_cancelled() {
-                Err(JoinError::cancelled(runner_state.id))
-            } else {
-                catch_unwind(AssertUnwindSafe(func))
-                    .map_err(|payload| panic_error(runner_state.id, payload))
-            };
+            let output = trace.in_scope(|| {
+                if runner_state.is_cancelled() {
+                    Err(JoinError::cancelled(runner_state.id))
+                } else {
+                    catch_unwind(AssertUnwindSafe(func))
+                        .map_err(|payload| panic_error(runner_state.id, payload))
+                }
+            });
             runner_state.finish();
             let _ = tx.send(output);
         });
@@ -177,7 +210,13 @@ impl Runtime {
     /// Shut down without waiting for outstanding FFRT work.
     pub fn shutdown_background(self) {}
 
-    fn spawn_task<F>(&self, task: Task, future: F) -> JoinHandle<F::Output>
+    fn spawn_task<F>(
+        &self,
+        task: Task,
+        future: F,
+        name: Option<&str>,
+        location: &'static Location<'static>,
+    ) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
@@ -185,9 +224,19 @@ impl Runtime {
         let (tx, rx) = oneshot::channel();
         let state = CancellationState::new();
         let runner_state = state.clone();
+        let trace = TaskTrace::new(
+            "task",
+            name,
+            state.id,
+            std::mem::size_of::<F>(),
+            None,
+            location,
+        );
         task.submit(move || {
-            let output = catch_unwind(AssertUnwindSafe(|| poll_once(future, Some(&runner_state))))
-                .unwrap_or_else(|panic| Err(panic_error(runner_state.id, panic)));
+            let output = catch_unwind(AssertUnwindSafe(|| {
+                poll_once(future, Some(&runner_state), &trace)
+            }))
+            .unwrap_or_else(|panic| Err(panic_error(runner_state.id, panic)));
             // poll_once has dropped the future before completion is published.
             runner_state.finish();
             let _ = tx.send(output);
@@ -237,21 +286,43 @@ impl Handle {
     }
 
     /// Spawn a future on the runtime.
+    #[track_caller]
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        Runtime.spawn(future)
+        Runtime.spawn_named(future, None)
+    }
+
+    #[track_caller]
+    #[cfg(feature = "tracing")]
+    pub(crate) fn spawn_named<F>(&self, future: F, name: Option<&str>) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        Runtime.spawn_named(future, name)
     }
 
     /// Spawn a blocking closure on the runtime.
+    #[track_caller]
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        Runtime.spawn_blocking(func)
+        Runtime.spawn_blocking_named(func, None)
+    }
+
+    #[track_caller]
+    #[cfg(feature = "tracing")]
+    pub(crate) fn spawn_blocking_named<F, R>(&self, func: F, name: Option<&str>) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        Runtime.spawn_blocking_named(func, name)
     }
 
     /// FFRT schedules work across its process-wide worker pool.
@@ -471,7 +542,7 @@ impl Builder {
 fn poll_blocking<F: Future>(mut future: F) -> F::Output {
     let mut future = unsafe { Pin::new_unchecked(&mut future) };
     let waker_state = Arc::new(WakerState::new());
-    let waker = create_waker(waker_state.clone());
+    let waker = create_waker(waker_state.clone(), None);
     let mut cx = Context::from_waker(&waker);
 
     loop {
@@ -486,13 +557,14 @@ fn poll_blocking<F: Future>(mut future: F) -> F::Output {
 fn poll_once<F: Future>(
     mut future: F,
     cancellation: Option<&CancellationState>,
+    trace: &TaskTrace,
 ) -> Result<F::Output> {
     let _task_id = cancellation.map(|state| CurrentTaskIdGuard::enter(state.id));
     let mut future = unsafe { Pin::new_unchecked(&mut future) };
 
     // Create a waker based on FFRT condition variable
     let waker_state = Arc::new(WakerState::new());
-    let waker = create_waker(waker_state.clone());
+    let waker = create_waker(waker_state.clone(), Some(trace.clone()));
     let mut cx = Context::from_waker(&waker);
     if let Some(cancellation) = cancellation {
         cancellation.register(&waker);
@@ -505,7 +577,7 @@ fn poll_once<F: Future>(
             ));
         }
 
-        if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+        if let Poll::Ready(output) = trace.in_scope(|| future.as_mut().poll(&mut cx)) {
             return Ok(output);
         }
 
@@ -530,6 +602,11 @@ pub struct Id(u64);
 impl Id {
     pub(crate) fn next() -> Self {
         Self(NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed))
+    }
+
+    #[cfg(feature = "tracing")]
+    pub(crate) const fn as_u64(self) -> u64 {
+        self.0
     }
 }
 
@@ -728,6 +805,7 @@ where
 }
 
 /// Spawn a future on the active runtime.
+#[track_caller]
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
@@ -741,6 +819,7 @@ where
 }
 
 /// Spawn a future with the supplied task attributes on the active runtime.
+#[track_caller]
 pub fn spawn_with_attr<F>(attr: TaskAttr, future: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
@@ -754,6 +833,7 @@ where
 }
 
 /// Spawn a blocking closure on the active runtime.
+#[track_caller]
 pub fn spawn_blocking<F, R>(func: F) -> JoinHandle<R>
 where
     F: FnOnce() -> R + Send + 'static,

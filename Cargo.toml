@@ -12,6 +12,8 @@ ffrt-macros = { path = "crates/ffrt-macros", version = "0.1.0" }
 futures = "0.3"
 libc = "0.2"
 bytes = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = "0.3"
 
 napi-ohos = { version = "1.1.4" }
 napi-derive-ohos = { version = "1.1.4" }

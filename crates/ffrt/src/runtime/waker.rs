@@ -11,6 +11,8 @@ use ffrt_sys::{
     ffrt_mutex_unlock, timespec,
 };
 
+use super::trace::TaskTrace;
+
 /// Waker 状态，使用 FFRT 同步原语
 pub struct WakerState {
     mutex: NonNull<ffrt_mutex_t>,
@@ -137,8 +139,66 @@ impl Drop for WakerState {
 unsafe impl Send for WakerState {}
 unsafe impl Sync for WakerState {}
 
+#[cfg(feature = "tracing")]
+struct WakerData {
+    state: Arc<WakerState>,
+    trace: Option<TaskTrace>,
+}
+
 /// 创建一个基于 WakerState 的 waker
-pub(crate) fn create_waker(state: Arc<WakerState>) -> Waker {
+#[cfg(feature = "tracing")]
+pub(crate) fn create_waker(state: Arc<WakerState>, trace: Option<TaskTrace>) -> Waker {
+    unsafe fn clone_waker(data: *const ()) -> RawWaker {
+        // SAFETY: data 由 create_waker 创建，保证是有效的 WakerData Arc 指针
+        let data = unsafe { Arc::from_raw(data as *const WakerData) };
+        if let Some(trace) = &data.trace {
+            trace.waker_event("waker.clone");
+        }
+        let cloned = data.clone();
+        std::mem::forget(data);
+        RawWaker::new(Arc::into_raw(cloned) as *const (), &WAKER_VTABLE)
+    }
+
+    unsafe fn wake(data: *const ()) {
+        // SAFETY: data 由 create_waker 创建，保证是有效的 WakerData Arc 指针
+        let data = unsafe { Arc::from_raw(data as *const WakerData) };
+        if let Some(trace) = &data.trace {
+            trace.waker_event("waker.wake");
+        }
+        data.state.wake();
+        // data 会在这里被 drop，这是正确的
+    }
+
+    unsafe fn wake_by_ref(data: *const ()) {
+        // SAFETY: data 由 create_waker 创建，保证是有效的 WakerData Arc 指针
+        let data = unsafe { Arc::from_raw(data as *const WakerData) };
+        if let Some(trace) = &data.trace {
+            trace.waker_event("waker.wake_by_ref");
+        }
+        data.state.wake();
+        std::mem::forget(data); // 不要 drop，因为只是引用
+    }
+
+    unsafe fn drop_waker(data: *const ()) {
+        // SAFETY: data 由 create_waker 创建，保证是有效的 WakerData Arc 指针
+        let data = unsafe { Arc::from_raw(data as *const WakerData) };
+        if let Some(trace) = &data.trace {
+            trace.waker_event("waker.drop");
+        }
+        // Arc 会在这里被 drop
+    }
+
+    static WAKER_VTABLE: RawWakerVTable =
+        RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker);
+
+    let data = Arc::new(WakerData { state, trace });
+    let raw_waker = RawWaker::new(Arc::into_raw(data) as *const (), &WAKER_VTABLE);
+
+    unsafe { Waker::from_raw(raw_waker) }
+}
+
+#[cfg(not(feature = "tracing"))]
+pub(crate) fn create_waker(state: Arc<WakerState>, _trace: Option<TaskTrace>) -> Waker {
     unsafe fn clone_waker(data: *const ()) -> RawWaker {
         // SAFETY: data 由 create_waker 创建，保证是有效的 WakerState Arc 指针
         let state = unsafe { Arc::from_raw(data as *const WakerState) };
@@ -151,26 +211,23 @@ pub(crate) fn create_waker(state: Arc<WakerState>) -> Waker {
         // SAFETY: data 由 create_waker 创建，保证是有效的 WakerState Arc 指针
         let state = unsafe { Arc::from_raw(data as *const WakerState) };
         state.wake();
-        // state 会在这里被 drop，这是正确的
     }
 
     unsafe fn wake_by_ref(data: *const ()) {
         // SAFETY: data 由 create_waker 创建，保证是有效的 WakerState Arc 指针
         let state = unsafe { Arc::from_raw(data as *const WakerState) };
         state.wake();
-        std::mem::forget(state); // 不要 drop，因为只是引用
+        std::mem::forget(state);
     }
 
     unsafe fn drop_waker(data: *const ()) {
         // SAFETY: data 由 create_waker 创建，保证是有效的 WakerState Arc 指针
         let _ = unsafe { Arc::from_raw(data as *const WakerState) };
-        // Arc 会在这里被 drop
     }
 
     static WAKER_VTABLE: RawWakerVTable =
         RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker);
 
     let raw_waker = RawWaker::new(Arc::into_raw(state) as *const (), &WAKER_VTABLE);
-
     unsafe { Waker::from_raw(raw_waker) }
 }
