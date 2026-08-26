@@ -1,34 +1,64 @@
-# Action name
-name: Simple Test Action
+name: Examples
 
-# Here, this action will be enabled on all pushes.
-# Modify this to fit your needs.
-on: push
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 
-# Jobs section
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.98.0"
+  OHRS_VERSION: "1.5.0"
+
 jobs:
-  simple-test:
-    runs-on: ubuntu-latest
+  examples:
+    name: Build examples (OHOS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Setup OpenHarmony SDK
-        uses: openharmony-rs/setup-ohos-sdk@v0.1
-        id: setup-ohos
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
         with:
           version: "5.0.0"
+          components: native
 
-      - name: Setup Rust environment
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: "aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos"
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos
 
-      - name: Install
-        run: cargo install ohrs
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: examples
 
-      - name: Run basic
-        run: cd examples/hello && ohrs build
+      - name: Cache ohrs
+        id: cache-ohrs
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/ohrs
+          key: ohrs-${{ runner.os }}-${{ runner.arch }}-${{ env.OHRS_VERSION }}
 
-      - name: Run example
-        run: cd examples/simple-ffrt && ohrs build
+      - name: Install ohrs
+        if: steps.cache-ohrs.outputs.cache-hit != 'true'
+        run: cargo install ohrs --version $OHRS_VERSION --locked
+
+      - name: Build hello example
+        working-directory: examples/hello
+        run: ohrs build
+
+      - name: Build FFRT example
+        working-directory: examples/simple-ffrt
+        run: ohrs build

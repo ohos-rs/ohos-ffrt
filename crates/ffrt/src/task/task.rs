@@ -3,7 +3,7 @@
 use std::ptr;
 use std::sync::Arc;
 
-use ohos_ffrt_sys::{
+use ffrt_sys::{
     ffrt_alloc_auto_managed_function_storage_base, ffrt_function_header_t,
     ffrt_function_kind_t_ffrt_function_kind_general, ffrt_submit_h_base, ffrt_task_handle_destroy,
     ffrt_task_handle_t,

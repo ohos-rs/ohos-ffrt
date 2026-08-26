@@ -68,7 +68,7 @@ impl<
     const MAX_QUEUE_SIZE: usize = MaxQueueSize;
 
     async fn call_local(&self, value: Self::T) -> Result<Self::Return> {
-        let (sender, receiver) = ohos_ffrt::oneshot::channel::<Return>();
+        let (sender, receiver) = ffrt::oneshot::channel::<Return>();
         self.handle.with_read_aborted(|aborted| {
             if aborted {
                 return Err(Error::from_status(Status::Closing));
@@ -127,7 +127,7 @@ impl<
     const MAX_QUEUE_SIZE: usize = MaxQueueSize;
 
     async fn call_local(&self, value: Result<Self::T, Self::ErrorStatus>) -> Result<Self::Return> {
-        let (sender, receiver) = ohos_ffrt::oneshot::channel::<Result<Return>>();
+        let (sender, receiver) = ffrt::oneshot::channel::<Result<Return>>();
         self.handle.with_read_aborted(|aborted| {
             if aborted {
                 return Err(Error::from_status(Status::Closing));

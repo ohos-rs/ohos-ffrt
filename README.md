@@ -1,16 +1,30 @@
-# ohos-ffrt
+# ffrt
 
-![Crates.io Version](https://img.shields.io/crates/v/ohos-ffrt) ![Platform](https://img.shields.io/badge/platform-arm64/arm/x86__64-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Crates.io Version](https://img.shields.io/crates/v/ffrt) ![Platform](https://img.shields.io/badge/platform-arm64/arm/x86__64-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This project provide a ffrt-binding and napi-ext for ffrt.
+This project provides FFRT bindings and a napi extension for FFRT.
 
-**Note: Don't use it to replace `tokio` directly, it only works for some simple scenarios now.**
+The `ffrt` crate is an OHOS execution backend for Tokio's stable production
+surface. An OHOS target can depend on the package as `tokio` and retain Tokio
+imports; see [the compatibility contract](./TOKIO_COMPATIBILITY.md) for the
+supported surface and deliberate FFRT scheduler/test-tool differences.
+
+The I/O layer uses an FFRT loop readiness reactor. It includes `AsyncFd`,
+non-blocking TCP/UDP types, `AsyncRead`/`AsyncWrite` extensions, `copy`,
+`split`, `BufReader`, and `BufWriter`. Synchronization includes owned mutex,
+rwlock, and semaphore guards; task-local values, Unix signals, and fair
+`select!` with up to 64 branches are also available. Unix modules are compiled
+only for `target_env = "ohos"`. Enabling the `tracing` feature emits
+Tokio-schema task spawn/poll and waker lifecycle diagnostics and exposes the
+named `tokio::task::Builder` API for tracing ecosystem integration.
 
 ## Install
 
 ```bash
-cargo add ohos-ffrt
-# or
+cargo add ffrt
+# raw sys bindings
+cargo add ffrt-sys
+# or the napi extension
 cargo add ohos-ext
 ```
 
@@ -20,7 +34,7 @@ We can use it as another thread.
 
 ```rs
 use napi_derive_ohos::napi;
-use ohos_ffrt::Task;
+use ffrt::Task;
 
 #[napi]
 pub fn run_ffrt() -> () {

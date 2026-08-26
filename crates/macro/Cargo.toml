@@ -3,7 +3,7 @@ name = "ohos-ext-macro"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "ohos ffrt macro for ohos-rs"
+description = "FFRT napi macro for ohos-rs"
 
 [lib]
 proc-macro = true

@@ -1,5 +1,5 @@
+use ffrt::{Task, TaskAttr, TaskPriority};
 use napi_derive_ohos::napi;
-use ohos_ffrt::{Task, TaskAttr, TaskPriority};
 
 #[napi]
 pub fn run_ffrt() {

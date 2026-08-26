@@ -3,12 +3,17 @@ members = ["crates/*", "examples/*"]
 resolver = "2"
 
 [workspace.dependencies]
-ohos-ffrt-sys = { path = "crates/sys", version = "0.1.0" }
-ohos-ffrt = { path = "crates/ffrt", version = "0.1.0" }
+ffrt-sys = { path = "crates/sys", version = "0.1.0" }
+ffrt = { path = "crates/ffrt", version = "0.1.0" }
 ohos-ext = { path = "crates/ext", version = "0.1.0" }
 ohos-ext-macro = { path = "crates/macro", version = "0.1.0" }
+ffrt-macros = { path = "crates/ffrt-macros", version = "0.1.0" }
 
 futures = "0.3"
+libc = "0.2"
+bytes = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = "0.3"
 
 napi-ohos = { version = "1.1.4" }
 napi-derive-ohos = { version = "1.1.4" }

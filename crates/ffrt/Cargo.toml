@@ -1,20 +1,50 @@
 [package]
-name = "ohos-ffrt"
+name = "ffrt"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "ohos ffrt runtime bindings"
+description = "FFRT async runtime bindings"
 
 [dependencies]
-ohos-ffrt-sys = { workspace = true }
+ffrt-sys = { workspace = true }
+libc = { workspace = true }
+bytes = { workspace = true }
+ffrt-macros = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [features]
 default = []
+full = [
+    "fs",
+    "io-std",
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+]
+fs = []
+io-std = []
+io-util = []
+macros = ["dep:ffrt-macros"]
+net = []
+process = []
+rt = []
+rt-multi-thread = ["rt"]
+signal = []
+sync = []
+test-util = ["time", "rt"]
+time = []
+tracing = ["dep:tracing"]
 api-13 = []
-api-14 = ["api-13", "ohos-ffrt-sys/api-14"]
-api-15 = ["api-14", "ohos-ffrt-sys/api-15"]
-api-16 = ["api-15", "ohos-ffrt-sys/api-16"]
-api-17 = ["api-16", "ohos-ffrt-sys/api-17"]
-api-18 = ["api-17", "ohos-ffrt-sys/api-18"]
-api-19 = ["api-18", "ohos-ffrt-sys/api-19"]
-api-20 = ["api-19", "ohos-ffrt-sys/api-20"]
+api-14 = ["api-13", "ffrt-sys/api-14"]
+api-15 = ["api-14", "ffrt-sys/api-15"]
+api-16 = ["api-15", "ffrt-sys/api-16"]
+api-17 = ["api-16", "ffrt-sys/api-17"]
+api-18 = ["api-17", "ffrt-sys/api-18"]
+api-19 = ["api-18", "ffrt-sys/api-19"]
+api-20 = ["api-19", "ffrt-sys/api-20"]

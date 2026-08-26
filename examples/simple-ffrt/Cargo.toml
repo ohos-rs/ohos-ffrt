@@ -10,16 +10,13 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-napi-ohos = { workspace = true, default-features = false, features = [
+napi-ohos = { workspace = true, features = [
     "napi8",
     "async",
 ] }
 napi-derive-ohos = { workspace = true }
-ohos-ffrt = { workspace = true }
+ffrt = { workspace = true }
 ohos-hilog-binding = { version = "*" }
 
 [build-dependencies]
 napi-build-ohos = { workspace = true }
-
-[profile.release]
-lto = true
