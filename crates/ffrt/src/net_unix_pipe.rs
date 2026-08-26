@@ -176,11 +176,11 @@ impl Sender {
     }
 
     pub fn try_write(&self, buf: &[u8]) -> io::Result<usize> {
-        self.try_io(|| (&*self.inner.get_ref()).write(buf))
+        self.try_io(|| self.inner.get_ref().write(buf))
     }
 
     pub fn try_write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        self.try_io(|| (&*self.inner.get_ref()).write_vectored(bufs))
+        self.try_io(|| self.inner.get_ref().write_vectored(bufs))
     }
 
     pub fn try_io<R>(&self, operation: impl FnOnce() -> io::Result<R>) -> io::Result<R> {
@@ -306,11 +306,11 @@ impl Receiver {
     }
 
     pub fn try_read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        self.try_io(|| (&*self.inner.get_ref()).read(buf))
+        self.try_io(|| self.inner.get_ref().read(buf))
     }
 
     pub fn try_read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        self.try_io(|| (&*self.inner.get_ref()).read_vectored(bufs))
+        self.try_io(|| self.inner.get_ref().read_vectored(bufs))
     }
 
     pub fn try_io<R>(&self, operation: impl FnOnce() -> io::Result<R>) -> io::Result<R> {

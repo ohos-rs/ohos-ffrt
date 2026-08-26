@@ -1,3 +1,7 @@
+// The OHOS target's `thread_local!` expansion triggers this lint even though
+// the user-visible initializer is already const.
+#![allow(clippy::missing_const_for_thread_local)]
+
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::Future;
@@ -10,7 +14,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use crate::lock::Mutex;
 use crate::runtime::{CancellationState, JoinHandle, Result as RuntimeResult, TaskTrace};
 
-thread_local! {
+std::thread_local! {
     static CURRENT_LOCAL: Cell<*const LocalSet> = const { Cell::new(std::ptr::null()) };
 }
 

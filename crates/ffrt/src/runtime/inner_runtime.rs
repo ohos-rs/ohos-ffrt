@@ -1,3 +1,7 @@
+// The OHOS target's `thread_local!` expansion triggers this lint even though
+// the user-visible initializer is already const.
+#![allow(clippy::missing_const_for_thread_local)]
+
 use super::WakerState;
 use super::trace::TaskTrace;
 use crate::signal::oneshot;
@@ -18,7 +22,7 @@ pub type Result<T> = std::result::Result<T, JoinError>;
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 static ACTIVE_TASKS: AtomicUsize = AtomicUsize::new(0);
 
-thread_local! {
+std::thread_local! {
     static CURRENT_TASK_ID: Cell<Option<Id>> = const { Cell::new(None) };
 }
 

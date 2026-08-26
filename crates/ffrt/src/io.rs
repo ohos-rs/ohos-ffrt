@@ -117,11 +117,21 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Returns the entire underlying buffer without initializing it.
+    ///
+    /// # Safety
+    ///
+    /// The caller must not de-initialize bytes in the region reported by
+    /// [`ReadBuf::initialized`].
     pub unsafe fn inner_mut(&mut self) -> &mut [MaybeUninit<u8>] {
         self.buf
     }
 
     /// Returns the unfilled region without initializing it.
+    ///
+    /// # Safety
+    ///
+    /// The caller must not de-initialize bytes in the region reported by
+    /// [`ReadBuf::initialized`].
     pub unsafe fn unfilled_mut(&mut self) -> &mut [MaybeUninit<u8>] {
         &mut self.buf[self.filled..]
     }
@@ -181,6 +191,11 @@ impl<'a> ReadBuf<'a> {
     }
 
     /// Marks the first `n` unfilled bytes as initialized.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the first `n` bytes after the filled region
+    /// have been fully initialized.
     pub unsafe fn assume_init(&mut self, n: usize) {
         let initialized = self.filled.checked_add(n).expect("initialized overflow");
         assert!(initialized <= self.capacity(), "initialized past capacity");

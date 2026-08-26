@@ -4,7 +4,7 @@ use crate::Runtime;
 use crate::lock::Mutex;
 
 pub(crate) static RUNTIME: LazyLock<Mutex<Option<Runtime>>> =
-    LazyLock::new(|| Mutex::new(Some(Runtime::default())));
+    LazyLock::new(|| Mutex::new(Some(Runtime)));
 
 static USER_RUNTIME: OnceLock<Mutex<Option<Runtime>>> = OnceLock::new();
 

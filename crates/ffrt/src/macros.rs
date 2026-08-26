@@ -565,7 +565,7 @@ macro_rules! __ffrt_select_run {
             let start = $crate::__ffrt_select_mode_start!($mode, $count);
             ::std::future::poll_fn(move |cx| {
                 for offset in 0..$count {
-                    match (start + offset) % $count {
+                    match $crate::__select_index(start, offset, $count) {
                         $($index => {
                             if !$enabled || $name.as_ref().get_ref().is_none() {
                                 continue;

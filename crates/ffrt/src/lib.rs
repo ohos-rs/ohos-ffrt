@@ -60,3 +60,10 @@ pub fn __select_start(branches: usize) -> usize {
         }
     }
 }
+
+/// Wraps a branch offset for the [`select!`] macro without exposing a modulo
+/// expression to lints in the downstream crate where the macro is expanded.
+#[doc(hidden)]
+pub fn __select_index(start: usize, offset: usize, branches: usize) -> usize {
+    (start + offset) % branches
+}

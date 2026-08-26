@@ -118,10 +118,9 @@ impl Notify {
                     .notified
                     .upgrade()
                     .is_some_and(|queued| Arc::ptr_eq(&queued, notified))
-            }) {
-                if !waiter.waker.will_wake(cx.waker()) {
-                    waiter.waker = cx.waker().clone();
-                }
+            }) && !waiter.waker.will_wake(cx.waker())
+            {
+                waiter.waker = cx.waker().clone();
             }
         } else {
             state.waiters.push_back(Waiter {
@@ -232,7 +231,7 @@ mod tests {
         let waiter = notify.clone().notified_owned();
         let notify_task = notify.clone();
         crate::Runtime::new().unwrap().block_on(async move {
-            let handle = crate::spawn(async move { waiter.await });
+            let handle = crate::spawn(waiter);
             crate::task::yield_now().await;
             notify_task.notify_waiters();
             handle.await.unwrap();

@@ -89,7 +89,7 @@ fn expand(args: TokenStream, input: TokenStream, is_test: bool) -> TokenStream {
     let mut function = parse_macro_input!(input as ItemFn);
 
     if function.sig.asyncness.take().is_none() {
-        return syn::Error::new_spanned(&function.sig.fn_token, "the async keyword is missing")
+        return syn::Error::new_spanned(function.sig.fn_token, "the async keyword is missing")
             .into_compile_error()
             .into();
     }
