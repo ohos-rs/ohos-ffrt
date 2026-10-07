@@ -82,6 +82,41 @@ pub async fn example_e() -> napi_ohos::Result<String> {
 }
 ```
 
+## Regression tests
+
+On Linux, install Rust, CMake, Git, and a C/C++ compiler, then run:
+
+```bash
+scripts/test-linux.sh
+```
+
+This builds pinned upstream FFRT and securec revisions, runs unit, integration,
+macro, and documentation tests, checks the no-default-features configuration,
+and executes `qemu_smoke` and the `tokio` package-alias example. The PR workflow
+runs the same script. Linux testing supplements the OHOS compatibility contract.
+`FFRT_TEST_SOURCE` and `FFRT_TEST_SECUREC` can point to existing source checkouts
+for offline runs; `FFRT_TEST_CACHE` selects the build cache directory.
+
+To execute tests on an already connected arm64 OpenHarmony device or QEMU guest:
+
+```bash
+export HDC=/path/to/toolchains/hdc
+export HDC_TARGET=127.0.0.1:5555
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=/path/to/native/llvm/bin/aarch64-unknown-linux-ohos-clang
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUNNER="python3 $(pwd)/scripts/ohos-runner.py"
+cargo test --locked -p ffrt --all-features --target aarch64-unknown-linux-ohos --lib --tests
+cargo run --locked -p ffrt --all-features --target aarch64-unknown-linux-ohos --example qemu_smoke
+cargo run --locked -p tokio-compat --target aarch64-unknown-linux-ohos
+```
+
+The runner uploads each binary to a unique temporary path, propagates its exit
+status, and removes it afterward. `OHOS_HDC_SERVER_PORT` selects an alternate
+HDC server. Static checks cover arm64, armv7, and x86_64 OHOS targets.
+
+`TaskAttr` owns its native allocation and implements deep `Clone`; it is no
+longer `Copy`. `get_name()` returns an owned `String`, which remains valid after
+renaming or dropping the attribute.
+
 ## What is FFRT and Why we need it?
 
 You can see it as a built-in ThreadPool or async runtime. See detail with [ffrt-kit](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ffrt-kit).
