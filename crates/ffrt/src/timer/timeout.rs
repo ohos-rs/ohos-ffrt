@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use super::{Sleep, sleep_until};
+use super::{sleep_until, Sleep};
 
 /// Error returned when a future exceeds the supplied duration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

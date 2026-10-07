@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use crate::lock::Mutex;
 use crate::looper::{
-    EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLLERR, EPOLLHUP, EPOLLIN, EPOLLOUT, EPOLLPRI, Looper,
-    LooperTimer,
+    Looper, LooperTimer, EPOLLERR, EPOLLHUP, EPOLLIN, EPOLLOUT, EPOLLPRI, EPOLL_CTL_ADD,
+    EPOLL_CTL_DEL,
 };
 use crate::queue::{Queue, QueueType};
 
@@ -261,8 +261,8 @@ struct ScheduledIo {
     reactor: Arc<ReactorInner>,
 }
 
-fn registrations()
--> &'static std::sync::Mutex<std::collections::HashMap<usize, std::sync::Weak<ScheduledIo>>> {
+fn registrations(
+) -> &'static std::sync::Mutex<std::collections::HashMap<usize, std::sync::Weak<ScheduledIo>>> {
     static REGISTRATIONS: OnceLock<
         std::sync::Mutex<std::collections::HashMap<usize, std::sync::Weak<ScheduledIo>>>,
     > = OnceLock::new();

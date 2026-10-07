@@ -1,11 +1,11 @@
 use proc_macro::TokenStream;
-use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::Span;
+use proc_macro_crate::{crate_name, FoundCrate};
 use quote::format_ident;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{
-    Expr, ExprLit, ItemFn, Lit, LitInt, LitStr, MetaNameValue, Result, Token, parse_macro_input,
+    parse_macro_input, Expr, ExprLit, ItemFn, Lit, LitInt, LitStr, MetaNameValue, Result, Token,
 };
 
 #[derive(Default)]

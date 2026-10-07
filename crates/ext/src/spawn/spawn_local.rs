@@ -1,6 +1,6 @@
 use ffrt::{Runtime, TaskAttr};
 use futures::Future;
-use napi_ohos::{Env, Error, JsValue, Result, SendableResolver, Status, Unknown, sys};
+use napi_ohos::{sys, Env, Error, JsValue, Result, SendableResolver, Status, Unknown};
 
 pub fn spawn_local<
     Data: 'static + Send,

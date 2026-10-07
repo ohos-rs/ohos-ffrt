@@ -1,9 +1,9 @@
 //! Regression coverage for cancellation, ownership, and macro compatibility.
 use std::cell::Cell;
-use std::future::{Future, pending, ready};
-use std::pin::{Pin, pin};
-use std::sync::Arc;
+use std::future::{pending, ready, Future};
+use std::pin::{pin, Pin};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
@@ -67,12 +67,10 @@ fn notification_enable_keeps_registered_waker() {
     let mut future = pin!(notify.notified());
     let counter = Arc::new(WakeCount::default());
     let waker = Waker::from(counter.clone());
-    assert!(
-        future
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending()
-    );
+    assert!(future
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
     assert!(!future.as_mut().enable());
     notify.notify_one();
     assert_eq!(counter.0.load(Ordering::Relaxed), 1);
@@ -108,11 +106,10 @@ fn closed_channel_waits_for_reserved_permits_and_wakes_on_release() {
     let counter = Arc::new(WakeCount::default());
     let waker = Waker::from(counter.clone());
     let mut recv = pin!(rx.recv());
-    assert!(
-        recv.as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending()
-    );
+    assert!(recv
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
     drop(permit);
     assert_eq!(counter.0.load(Ordering::Relaxed), 1);
     assert!(matches!(poll(recv.as_mut()), Poll::Ready(None)));
@@ -312,11 +309,9 @@ fn cancelled_child_wait_does_not_block_kill() {
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        assert!(
-            ffrt::time::timeout(Duration::from_millis(30), child.wait())
-                .await
-                .is_err()
-        );
+        assert!(ffrt::time::timeout(Duration::from_millis(30), child.wait())
+            .await
+            .is_err());
         let start = Instant::now();
         child.start_kill().unwrap();
         assert!(start.elapsed() < Duration::from_secs(1));
@@ -336,11 +331,9 @@ fn cancelled_child_wait_does_not_block_drop() {
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
-        assert!(
-            ffrt::time::timeout(Duration::from_millis(30), child.wait())
-                .await
-                .is_err()
-        );
+        assert!(ffrt::time::timeout(Duration::from_millis(30), child.wait())
+            .await
+            .is_err());
         let start = Instant::now();
         drop(child);
         assert!(start.elapsed() < Duration::from_secs(1));
@@ -354,12 +347,10 @@ fn mutex_mapping_panics_release_every_guard_kind() {
     let lock = Arc::new(Mutex::new(1u8));
     macro_rules! check {
         ($guard:expr, $ty:ident, $method:ident) => {{
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _ = $ty::$method::<u8, _>($guard, |_| panic!("mapping panic"));
-                }))
-                .is_err()
-            );
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = $ty::$method::<u8, _>($guard, |_| panic!("mapping panic"));
+            }))
+            .is_err());
             assert!(
                 lock.try_lock().is_ok(),
                 "{}::{} leaked its lock",
@@ -407,12 +398,10 @@ fn rwlock_mapping_panics_release_every_guard_kind() {
     let lock = Arc::new(RwLock::new(1u8));
     macro_rules! check {
         ($guard:expr, $ty:ident, $method:ident) => {{
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _ = $ty::$method::<u8, _>($guard, |_| panic!("mapping panic"));
-                }))
-                .is_err()
-            );
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = $ty::$method::<u8, _>($guard, |_| panic!("mapping panic"));
+            }))
+            .is_err());
             assert!(
                 lock.try_write().is_ok(),
                 "{}::{} leaked its lock",

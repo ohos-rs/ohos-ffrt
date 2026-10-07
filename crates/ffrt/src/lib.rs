@@ -33,11 +33,11 @@ pub mod time {
     }
     pub use std::time::{Duration, Instant};
 
-    pub use crate::timer::Sleep;
+    pub use crate::timer::interval::{interval, interval_at, Interval, MissedTickBehavior};
     pub use crate::timer::r#async::{sleep, sleep_until};
-    pub use crate::timer::interval::{Interval, MissedTickBehavior, interval, interval_at};
     pub use crate::timer::sync::sleep as sleep_blocking;
-    pub use crate::timer::timeout::{Elapsed, Timeout, timeout, timeout_at};
+    pub use crate::timer::timeout::{timeout, timeout_at, Elapsed, Timeout};
+    pub use crate::timer::Sleep;
 }
 
 pub use lock::*;

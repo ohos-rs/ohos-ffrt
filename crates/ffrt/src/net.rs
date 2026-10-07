@@ -27,7 +27,7 @@ pub mod unix {
 
     /// Unix anonymous pipe and FIFO support.
     pub mod pipe {
-        pub use super::super::unix_pipe_impl::{OpenOptions, Receiver, Sender, pipe};
+        pub use super::super::unix_pipe_impl::{pipe, OpenOptions, Receiver, Sender};
     }
 
     pub use super::unix_impl::{

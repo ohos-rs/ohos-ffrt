@@ -370,9 +370,7 @@ impl<T> Sender<T> {
         }
 
         let capacity = guard.inner().capacity;
-        if let Some(cap) = capacity
-            && guard.inner().queue.len() + guard.inner().reserved >= cap
-        {
+        if capacity.is_some_and(|cap| guard.inner().queue.len() + guard.inner().reserved >= cap) {
             return Err(TrySendError::Full(value));
         }
 
@@ -400,8 +398,7 @@ impl<T> Sender<T> {
             }
 
             let capacity = guard.inner().capacity;
-            if let Some(cap) = capacity
-                && guard.inner().queue.len() + guard.inner().reserved >= cap
+            if capacity.is_some_and(|cap| guard.inner().queue.len() + guard.inner().reserved >= cap)
             {
                 guard.wait();
                 continue;
@@ -750,11 +747,10 @@ fn release_reserved<T>(shared: &Arc<Shared<T>>, permits: usize) {
     }
     let mut guard = shared.lock();
     guard.inner_mut().reserved -= permits;
-    if !guard.inner().receiver_alive
-        && guard.inner().reserved == 0
-        && let Some(waker) = guard.inner_mut().recv_waker.take()
-    {
-        waker.wake();
+    if !guard.inner().receiver_alive && guard.inner().reserved == 0 {
+        if let Some(waker) = guard.inner_mut().recv_waker.take() {
+            waker.wake();
+        }
     }
     while let Some(waker) = guard.inner_mut().send_wakers.pop_front() {
         waker.wake();
@@ -839,9 +835,7 @@ impl<T> Future for SendFuture<T> {
         }
 
         let capacity = guard.inner().capacity;
-        if let Some(cap) = capacity
-            && guard.inner().queue.len() + guard.inner().reserved >= cap
-        {
+        if capacity.is_some_and(|cap| guard.inner().queue.len() + guard.inner().reserved >= cap) {
             // 队列已满，保存 waker 并返回 Pending
             guard.inner_mut().send_wakers.push_back(cx.waker().clone());
             return Poll::Pending;

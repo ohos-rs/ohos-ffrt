@@ -36,7 +36,7 @@ export RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-Lnative=${CACHE}/build/src"
 export RUSTDOCFLAGS="${RUSTDOCFLAGS:+${RUSTDOCFLAGS} }-Lnative=${CACHE}/build/src"
 export LD_LIBRARY_PATH="${CACHE}/build/src:${CACHE}/build${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 cd "${ROOT}"
-cargo test --locked -p ffrt-macros -p ohos-ext-macro
+cargo test --locked -p ffrt-macros -p napi-ffrt-ext-macro
 cargo test --locked -p ffrt --all-features
 cargo test --locked -p ffrt --no-default-features --test regressions
 cargo run --locked -p ffrt --all-features --example qemu_smoke

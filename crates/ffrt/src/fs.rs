@@ -5,7 +5,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll, ready};
+use std::task::{ready, Context, Poll};
 
 use crate::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 use crate::runtime::JoinHandle;
@@ -829,11 +829,9 @@ mod regression_tests {
         file.operation = Some(FileOperation::Read(handle));
         let mut cx = Context::from_waker(Waker::noop());
         let mut original = [0; 8];
-        assert!(
-            Pin::new(&mut file)
-                .poll_read(&mut cx, &mut ReadBuf::new(&mut original))
-                .is_pending()
-        );
+        assert!(Pin::new(&mut file)
+            .poll_read(&mut cx, &mut ReadBuf::new(&mut original))
+            .is_pending());
         // Complete the read only after its original borrowing future is gone.
         tx.send(Ok(Ok((8, b"abcdefgh".to_vec())))).unwrap();
         let mut output = Vec::new();
@@ -857,11 +855,9 @@ mod regression_tests {
         let (tx, handle) = crate::runtime::local_join_channel();
         file.operation = Some(FileOperation::Write(handle));
         let mut cx = Context::from_waker(Waker::noop());
-        assert!(
-            Pin::new(&mut file)
-                .poll_write(&mut cx, b"cancelled-long-buffer")
-                .is_pending()
-        );
+        assert!(Pin::new(&mut file)
+            .poll_write(&mut cx, b"cancelled-long-buffer")
+            .is_pending());
         tx.send(Ok(Ok(100))).unwrap();
         assert!(matches!(
             Pin::new(&mut file).poll_write(&mut cx, b"new"),

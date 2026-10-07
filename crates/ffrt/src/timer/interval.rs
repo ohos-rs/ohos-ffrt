@@ -1,10 +1,10 @@
 use std::fmt;
-use std::future::{Future, poll_fn};
+use std::future::{poll_fn, Future};
 use std::pin::Pin;
-use std::task::{Context, Poll, ready};
+use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
-use crate::timer::{Sleep, sleep_until};
+use crate::timer::{sleep_until, Sleep};
 
 /// Behavior used when an interval fires later than scheduled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

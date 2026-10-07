@@ -1,8 +1,8 @@
 use ffrt::TaskAttr;
 use futures::Future;
 use napi_ohos::{
-    Env, Result,
     bindgen_prelude::{PromiseRaw, ToNapiValue},
+    Env, Result,
 };
 
 use crate::spawn_local;

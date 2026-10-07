@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi-ohos = { workspace = true, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
-ohos-ext = { workspace = true }
+napi-ffrt-ext = { workspace = true }
 
 ohos-hilog-binding = { version = "*" }
 

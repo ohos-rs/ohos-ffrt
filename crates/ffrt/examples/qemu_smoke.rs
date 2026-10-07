@@ -6,14 +6,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ffrt::io::{
-    AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, copy, join, split,
+    copy, join, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter,
 };
 use ffrt::net::{TcpListener, TcpStream};
 use ffrt::reactor::{AsyncFd, Interest};
 #[cfg(target_env = "ohos")]
-use ffrt::signal::unix::{SignalKind, signal};
+use ffrt::signal::unix::{signal, SignalKind};
 use ffrt::sync::{
-    Mutex, Notify, OnceCell, RwLock, Semaphore, SetOnce, broadcast, mpsc, oneshot, watch,
+    broadcast, mpsc, oneshot, watch, Mutex, Notify, OnceCell, RwLock, Semaphore, SetOnce,
 };
 
 ffrt::task_local! {
