@@ -264,6 +264,9 @@ pub struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
 }
 
+// Shared guard access exposes &T, so T must also be Sync.
+unsafe impl<T: Send + Sync> Sync for MutexGuard<'_, T> {}
+
 impl<'a, T> MutexGuard<'a, T> {
     /// Maps this guard to a mutable subfield of the protected value.
     pub fn map<U, F>(this: Self, f: F) -> MappedMutexGuard<'a, U>
@@ -271,8 +274,8 @@ impl<'a, T> MutexGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> &mut U,
     {
+        let value = f(unsafe { &mut *this.mutex.value.get() }) as *mut _;
         let this = ManuallyDrop::new(this);
-        let value = f(unsafe { &mut *this.mutex.value.get() });
         MappedMutexGuard {
             mutex: (this.mutex as *const Mutex<T>).cast(),
             value,
@@ -287,10 +290,11 @@ impl<'a, T> MutexGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> Option<&mut U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.mutex.value.get() }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         Ok(MappedMutexGuard {
             mutex: (this.mutex as *const Mutex<T>).cast(),
             value,
@@ -325,6 +329,8 @@ pub struct OwnedMutexGuard<T> {
     mutex: Arc<Mutex<T>>,
 }
 
+unsafe impl<T: Send + Sync> Sync for OwnedMutexGuard<T> {}
+
 impl<T> OwnedMutexGuard<T> {
     /// Returns the original mutex.
     pub fn mutex(this: &Self) -> &Arc<Mutex<T>> {
@@ -337,8 +343,8 @@ impl<T> OwnedMutexGuard<T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> &mut U,
     {
+        let value = f(unsafe { &mut *this.mutex.value.get() }) as *mut _;
         let this = ManuallyDrop::new(this);
-        let value = f(unsafe { &mut *this.mutex.value.get() });
         let mutex = unsafe { std::ptr::read(&this.mutex) };
         OwnedMappedMutexGuard { mutex, value }
     }
@@ -349,10 +355,11 @@ impl<T> OwnedMutexGuard<T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> Option<&mut U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.mutex.value.get() }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         let mutex = unsafe { std::ptr::read(&this.mutex) };
         Ok(OwnedMappedMutexGuard { mutex, value })
     }
@@ -400,8 +407,8 @@ impl<'a, T: ?Sized> MappedMutexGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> &mut U,
     {
-        let mut this = ManuallyDrop::new(this);
-        let value = f(unsafe { &mut *this.value });
+        let value = f(unsafe { &mut *this.value }) as *mut _;
+        let this = ManuallyDrop::new(this);
         MappedMutexGuard {
             mutex: this.mutex,
             value,
@@ -416,10 +423,11 @@ impl<'a, T: ?Sized> MappedMutexGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> Option<&mut U>,
     {
-        let mut this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.value }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         Ok(MappedMutexGuard {
             mutex: this.mutex,
             value,
@@ -482,8 +490,8 @@ impl<T, U: ?Sized> OwnedMappedMutexGuard<T, U> {
         V: ?Sized,
         F: FnOnce(&mut U) -> &mut V,
     {
-        let mut this = ManuallyDrop::new(this);
-        let value = f(unsafe { &mut *this.value });
+        let value = f(unsafe { &mut *this.value }) as *mut _;
+        let this = ManuallyDrop::new(this);
         let mutex = unsafe { std::ptr::read(&this.mutex) };
         OwnedMappedMutexGuard { mutex, value }
     }
@@ -494,10 +502,11 @@ impl<T, U: ?Sized> OwnedMappedMutexGuard<T, U> {
         V: ?Sized,
         F: FnOnce(&mut U) -> Option<&mut V>,
     {
-        let mut this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.value }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         let mutex = unsafe { std::ptr::read(&this.mutex) };
         Ok(OwnedMappedMutexGuard { mutex, value })
     }

@@ -14,6 +14,7 @@ use std::task::{Context, Poll, Waker};
 /// # Examples
 ///
 /// ```no_run
+/// # ffrt::Runtime::new().unwrap().block_on(async {
 /// use ffrt::signal::mpsc;
 ///
 /// let (tx, mut rx) = mpsc::unbounded_channel();
@@ -25,6 +26,7 @@ use std::task::{Context, Poll, Waker};
 /// if let Some(value) = rx.recv().await {
 ///     println!("Got: {}", value);
 /// }
+/// # });
 /// ```
 pub fn unbounded_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
     let shared = Arc::new(Shared::new(None));
@@ -43,6 +45,7 @@ pub fn unbounded_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
 /// # Examples
 ///
 /// ```no_run
+/// # ffrt::Runtime::new().unwrap().block_on(async {
 /// use ffrt::signal::mpsc;
 ///
 /// let (tx, mut rx) = mpsc::channel(10);
@@ -56,6 +59,7 @@ pub fn unbounded_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
 /// while let Some(value) = rx.recv().await {
 ///     println!("Got: {}", value);
 /// }
+/// # });
 /// ```
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     assert!(
@@ -585,7 +589,9 @@ impl<T> Drop for Sender<T> {
         let mut guard = self.shared.lock();
         guard.inner_mut().sender_count -= 1;
 
-        if guard.inner().sender_count == 0 {
+        if guard.inner().sender_count == 0
+            || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+        {
             // 唤醒等待的接收者
             if let Some(waker) = guard.inner_mut().recv_waker.take() {
                 waker.wake();
@@ -603,12 +609,20 @@ pub struct WeakSender<T> {
 impl<T> WeakSender<T> {
     pub fn upgrade(&self) -> Option<Sender<T>> {
         let shared = self.shared.upgrade()?;
-        shared.lock().inner_mut().sender_count += 1;
+        {
+            let mut guard = shared.lock();
+            if guard.inner().sender_count == 0 {
+                return None;
+            }
+            guard.inner_mut().sender_count += 1;
+        }
         Some(Sender { shared })
     }
 
     pub fn strong_count(&self) -> usize {
-        self.shared.strong_count()
+        self.shared
+            .upgrade()
+            .map_or(0, |shared| shared.lock().inner().sender_count)
     }
 
     pub fn weak_count(&self) -> usize {
@@ -736,6 +750,12 @@ fn release_reserved<T>(shared: &Arc<Shared<T>>, permits: usize) {
     }
     let mut guard = shared.lock();
     guard.inner_mut().reserved -= permits;
+    if !guard.inner().receiver_alive
+        && guard.inner().reserved == 0
+        && let Some(waker) = guard.inner_mut().recv_waker.take()
+    {
+        waker.wake();
+    }
     while let Some(waker) = guard.inner_mut().send_wakers.pop_front() {
         waker.wake();
     }
@@ -758,7 +778,9 @@ fn poll_recv_shared<T>(shared: &Arc<Shared<T>>, cx: &mut Context<'_>) -> Poll<Op
         guard.broadcast();
         return Poll::Ready(Some(value));
     }
-    if guard.inner().sender_count == 0 {
+    if guard.inner().sender_count == 0
+        || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+    {
         return Poll::Ready(None);
     }
     guard.inner_mut().recv_waker = Some(cx.waker().clone());
@@ -789,7 +811,9 @@ fn poll_recv_many_shared<T>(
         guard.broadcast();
         return Poll::Ready(received);
     }
-    if guard.inner().sender_count == 0 {
+    if guard.inner().sender_count == 0
+        || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+    {
         return Poll::Ready(0);
     }
     guard.inner_mut().recv_waker = Some(cx.waker().clone());
@@ -949,7 +973,9 @@ impl<T> Receiver<T> {
             wake_senders(&mut guard);
             guard.broadcast();
             Ok(value)
-        } else if guard.inner().sender_count == 0 {
+        } else if guard.inner().sender_count == 0
+            || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+        {
             Err(TryRecvError::Disconnected)
         } else {
             Err(TryRecvError::Empty)
@@ -969,7 +995,9 @@ impl<T> Receiver<T> {
                 return Some(value);
             }
 
-            if guard.inner().sender_count == 0 {
+            if guard.inner().sender_count == 0
+                || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+            {
                 return None;
             }
 
@@ -1120,7 +1148,9 @@ impl<T> Future for RecvTimeoutFuture<'_, T> {
             return Poll::Ready(Ok(value));
         }
 
-        if guard.inner().sender_count == 0 {
+        if guard.inner().sender_count == 0
+            || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+        {
             return Poll::Ready(Err(RecvTimeoutError::Closed));
         }
 
@@ -1150,7 +1180,9 @@ impl<T> Future for UnboundedRecvTimeoutFuture<'_, T> {
             return Poll::Ready(Ok(value));
         }
 
-        if guard.inner().sender_count == 0 {
+        if guard.inner().sender_count == 0
+            || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+        {
             return Poll::Ready(Err(RecvTimeoutError::Closed));
         }
 
@@ -1251,7 +1283,9 @@ impl<T> Drop for UnboundedSender<T> {
         let mut guard = self.shared.lock();
         guard.inner_mut().sender_count -= 1;
 
-        if guard.inner().sender_count == 0 {
+        if guard.inner().sender_count == 0
+            || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+        {
             // 唤醒等待的接收者
             if let Some(waker) = guard.inner_mut().recv_waker.take() {
                 waker.wake();
@@ -1271,13 +1305,18 @@ impl<T> WeakUnboundedSender<T> {
         let shared = self.shared.upgrade()?;
         {
             let mut guard = shared.lock();
+            if guard.inner().sender_count == 0 {
+                return None;
+            }
             guard.inner_mut().sender_count += 1;
         }
         Some(UnboundedSender { shared })
     }
 
     pub fn strong_count(&self) -> usize {
-        self.shared.strong_count()
+        self.shared
+            .upgrade()
+            .map_or(0, |shared| shared.lock().inner().sender_count)
     }
 
     pub fn weak_count(&self) -> usize {
@@ -1352,7 +1391,9 @@ impl<T> UnboundedReceiver<T> {
         if let Some(value) = guard.inner_mut().queue.pop_front() {
             guard.broadcast();
             Ok(value)
-        } else if guard.inner().sender_count == 0 {
+        } else if guard.inner().sender_count == 0
+            || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+        {
             Err(TryRecvError::Disconnected)
         } else {
             Err(TryRecvError::Empty)
@@ -1371,7 +1412,9 @@ impl<T> UnboundedReceiver<T> {
                 return Some(value);
             }
 
-            if guard.inner().sender_count == 0 {
+            if guard.inner().sender_count == 0
+                || (!guard.inner().receiver_alive && guard.inner().reserved == 0)
+            {
                 return None;
             }
 

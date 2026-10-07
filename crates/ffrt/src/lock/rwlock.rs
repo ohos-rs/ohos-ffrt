@@ -91,6 +91,7 @@ impl<T> Drop for RwLock<T> {
     fn drop(&mut self) {
         unsafe {
             ffrt_rwlock_destroy(self.inner.as_ptr());
+            drop(Box::from_raw(self.inner.as_ptr()));
         }
     }
 }

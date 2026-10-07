@@ -252,63 +252,54 @@ pub(crate) fn register_timer(
 struct ScheduledIo {
     fd: RawFd,
     interest: Interest,
-    // Generation and readiness bits are updated atomically so a guard from an
-    // older edge can never clear a newer event (the AsyncFd ABA race).
     readiness: AtomicU64,
     registered: AtomicBool,
-    armed: AtomicBool,
+    // Serializes ADD/DEL, readiness changes and final deregistration.
+    events: Mutex<u32>,
+    token: usize,
     waiters: Mutex<Waiters>,
     reactor: Arc<ReactorInner>,
 }
 
+fn registrations()
+-> &'static std::sync::Mutex<std::collections::HashMap<usize, std::sync::Weak<ScheduledIo>>> {
+    static REGISTRATIONS: OnceLock<
+        std::sync::Mutex<std::collections::HashMap<usize, std::sync::Weak<ScheduledIo>>>,
+    > = OnceLock::new();
+    REGISTRATIONS.get_or_init(Default::default)
+}
+
+fn next_token() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .expect("FFRT I/O registration identifiers exhausted")
+}
+
 unsafe extern "C" fn readiness_callback(data: *mut c_void, events: u32) {
-    if data.is_null() {
-        return;
+    // FFRT may deliver an event from a batch fetched before DEL. The opaque
+    // token is never dereferenced or reused; stale callbacks simply miss the
+    // registry. A successful upgrade owns the state for the entire callback.
+    let io = registrations()
+        .lock()
+        .unwrap()
+        .get(&(data as usize))
+        .and_then(std::sync::Weak::upgrade);
+    let Some(io) = io else { return };
+    {
+        let mut registered_events = io.events.lock().unwrap();
+        if !io.registered.load(Ordering::Acquire) {
+            return;
+        }
+        let (generation, ready) = unpack_readiness(io.readiness.load(Ordering::Acquire));
+        io.readiness.store(
+            pack_readiness(generation.wrapping_add(1), ready | events),
+            Ordering::Release,
+        );
+        if io.update_interest(&mut registered_events).is_err() {
+            io.record_error();
+        }
     }
-
-    // The registration owns one strong Arc reference for exactly as long as
-    // FFRT may invoke this callback. Take a temporary reference so a concurrent
-    // AsyncFd drop cannot release the callback state while this call is active.
-    let pointer = data.cast::<ScheduledIo>();
-    unsafe { Arc::increment_strong_count(pointer) };
-    let io = unsafe { Arc::from_raw(pointer) };
-    if !io.registered.load(Ordering::Acquire) || !io.armed.swap(false, Ordering::AcqRel) {
-        return;
-    }
-
-    // FFRT does not consistently honor EPOLLONESHOT on every OpenHarmony
-    // architecture. Remove the descriptor before publishing readiness and
-    // add it again only after the caller observes WouldBlock.
-    let _ = unsafe {
-        io.reactor
-            .looper
-            .epoll_ctl(EPOLL_CTL_DEL, io.fd, 0, std::ptr::null_mut(), None)
-    };
-    let _ = io
-        .readiness
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-            let (generation, ready) = unpack_readiness(current);
-            Some(pack_readiness(generation.wrapping_add(1), ready | events))
-        });
-
-    let (readers, writers) = {
-        let mut waiters = io.waiters.lock().unwrap();
-        let readers = if events & (EPOLLIN | EPOLLPRI | ERROR_EVENTS) != 0 {
-            std::mem::take(&mut waiters.readers)
-        } else {
-            Vec::new()
-        };
-        let writers = if events & (EPOLLOUT | ERROR_EVENTS) != 0 {
-            std::mem::take(&mut waiters.writers)
-        } else {
-            Vec::new()
-        };
-        (readers, writers)
-    };
-
-    for waker in readers.into_iter().chain(writers) {
-        waker.wake();
-    }
+    io.wake_ready();
 }
 
 impl ScheduledIo {
@@ -319,38 +310,95 @@ impl ScheduledIo {
                 "AsyncFd requires a valid fd and non-empty interest",
             ));
         }
-
-        let reactor = reactor().clone();
         let io = Arc::new(Self {
             fd,
             interest,
             readiness: AtomicU64::new(0),
             registered: AtomicBool::new(true),
-            armed: AtomicBool::new(true),
+            events: Mutex::new(0),
+            token: next_token(),
             waiters: Mutex::new(Waiters::default()),
-            reactor,
+            reactor: reactor().clone(),
         });
-
-        // Keep the callback data alive independently of the public AsyncFd.
-        let data = Arc::into_raw(io.clone()).cast_mut().cast::<c_void>();
-        let result = unsafe {
-            io.reactor.looper.epoll_ctl(
-                EPOLL_CTL_ADD,
-                fd,
-                interest.0 | ERROR_EVENTS,
-                data,
-                Some(readiness_callback),
-            )
-        };
-
-        if let Err(code) = result {
-            io.armed.store(false, Ordering::Release);
-            io.registered.store(false, Ordering::Release);
-            unsafe { drop(Arc::from_raw(data.cast::<ScheduledIo>())) };
-            return Err(io::Error::from_raw_os_error(code));
+        registrations()
+            .lock()
+            .unwrap()
+            .insert(io.token, Arc::downgrade(&io));
+        let result = io.update_interest(&mut io.events.lock().unwrap());
+        if let Err(error) = result {
+            io.deregister();
+            return Err(error);
         }
-
         Ok(io)
+    }
+
+    // Called only with `events` locked. Keep monitoring directions that have
+    // no cached readiness: a writable socket must still receive read events.
+    // FFRT lacks reliable MOD/ONESHOT support, so change masks using DEL/ADD.
+    fn update_interest(&self, events: &mut u32) -> io::Result<()> {
+        let (_, ready) = unpack_readiness(self.readiness.load(Ordering::Acquire));
+        let desired = if ready & ERROR_EVENTS != 0 {
+            0
+        } else {
+            self.interest.0 & !ready
+        };
+        if desired == *events {
+            return Ok(());
+        }
+        if *events != 0 {
+            let result = unsafe {
+                self.reactor
+                    .looper
+                    .epoll_ctl(EPOLL_CTL_DEL, self.fd, 0, std::ptr::null_mut(), None)
+            };
+            *events = 0;
+            if result.is_err() {
+                return Err(io::Error::other("failed to remove FFRT fd interest"));
+            }
+        }
+        if desired != 0 {
+            unsafe {
+                self.reactor.looper.epoll_ctl(
+                    EPOLL_CTL_ADD,
+                    self.fd,
+                    desired | ERROR_EVENTS,
+                    self.token as *mut c_void,
+                    Some(readiness_callback),
+                )
+            }
+            .map_err(|_| io::Error::other("failed to register FFRT fd interest"))?;
+            *events = desired;
+        }
+        Ok(())
+    }
+
+    fn record_error(&self) {
+        let (generation, ready) = unpack_readiness(self.readiness.load(Ordering::Acquire));
+        self.readiness.store(
+            pack_readiness(generation.wrapping_add(1), ready | EPOLLERR),
+            Ordering::Release,
+        );
+    }
+
+    fn wake_ready(&self) {
+        let (_, ready) = unpack_readiness(self.readiness.load(Ordering::Acquire));
+        let (readers, writers) = {
+            let mut waiters = self.waiters.lock().unwrap();
+            let readers = if ready & (EPOLLIN | EPOLLPRI | ERROR_EVENTS) != 0 {
+                std::mem::take(&mut waiters.readers)
+            } else {
+                Vec::new()
+            };
+            let writers = if ready & (EPOLLOUT | ERROR_EVENTS) != 0 {
+                std::mem::take(&mut waiters.writers)
+            } else {
+                Vec::new()
+            };
+            (readers, writers)
+        };
+        for waker in readers.into_iter().chain(writers) {
+            waker.wake();
+        }
     }
 
     fn poll_ready(
@@ -359,19 +407,12 @@ impl ScheduledIo {
         interest: Interest,
     ) -> Poll<io::Result<(Ready, u32)>> {
         let mask = interest.0 | ERROR_EVENTS;
-        let (generation, ready) = unpack_readiness(self.readiness.load(Ordering::Acquire));
-        let ready = ready & mask;
-        if ready != 0 {
-            return Poll::Ready(Ok((Ready(ready), generation)));
-        }
-
         let mut waiters = self.waiters.lock().unwrap();
         let (generation, ready) = unpack_readiness(self.readiness.load(Ordering::Acquire));
         let ready = ready & mask;
         if ready != 0 {
             return Poll::Ready(Ok((Ready(ready), generation)));
         }
-
         if interest.is_readable() || interest.is_priority() || interest.is_error() {
             Waiters::register(&mut waiters.readers, cx.waker());
         }
@@ -382,78 +423,45 @@ impl ScheduledIo {
     }
 
     fn clear_ready(&self, ready: Ready, generation: u32) {
-        let mut current = self.readiness.load(Ordering::Acquire);
-        loop {
-            let (observed_generation, observed_ready) = unpack_readiness(current);
-            if observed_generation != generation {
-                // This guard belongs to an older readiness edge. Clearing it
-                // would discard an event that arrived after the guard formed.
+        let failed = {
+            let mut events = self.events.lock().unwrap();
+            if !self.registered.load(Ordering::Acquire) {
                 return;
             }
-            let next = pack_readiness(generation, observed_ready & !ready.0);
-            match self.readiness.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(observed) => current = observed,
+            let (observed_generation, observed_ready) =
+                unpack_readiness(self.readiness.load(Ordering::Acquire));
+            if observed_generation != generation {
+                return;
             }
-        }
-        if self.registered.load(Ordering::Acquire)
-            && self
-                .armed
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-        {
-            let result = unsafe {
-                self.reactor.looper.epoll_ctl(
-                    EPOLL_CTL_ADD,
-                    self.fd,
-                    self.interest.0 | ERROR_EVENTS,
-                    (self as *const Self).cast_mut().cast::<c_void>(),
-                    Some(readiness_callback),
-                )
-            };
-            if result.is_err() {
-                self.armed.store(false, Ordering::Release);
-                let _ =
-                    self.readiness
-                        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                            let (generation, ready) = unpack_readiness(current);
-                            Some(pack_readiness(generation.wrapping_add(1), ready | EPOLLERR))
-                        });
-                let waiters = {
-                    let mut waiters = self.waiters.lock().unwrap();
-                    let readers = std::mem::take(&mut waiters.readers);
-                    readers
-                        .into_iter()
-                        .chain(std::mem::take(&mut waiters.writers))
-                        .collect::<Vec<_>>()
-                };
-                for waker in waiters {
-                    waker.wake();
-                }
+            self.readiness.store(
+                pack_readiness(generation, observed_ready & !ready.0),
+                Ordering::Release,
+            );
+            let failed = self.update_interest(&mut events).is_err();
+            if failed {
+                self.record_error();
             }
+            failed
+        };
+        if failed {
+            self.wake_ready();
         }
     }
 
     fn deregister(&self) {
+        let mut events = self.events.lock().unwrap();
         if !self.registered.swap(false, Ordering::AcqRel) {
             return;
         }
-
-        self.armed.store(false, Ordering::Release);
-        let _ = unsafe {
-            self.reactor
-                .looper
-                .epoll_ctl(EPOLL_CTL_DEL, self.fd, 0, std::ptr::null_mut(), None)
-        };
-
-        // Balance the Arc::into_raw performed by register. FFRT guarantees
-        // that a deleted registration no longer invokes its callback.
-        unsafe { Arc::decrement_strong_count(self as *const Self) };
+        registrations().lock().unwrap().remove(&self.token);
+        if *events != 0 {
+            let _ = unsafe {
+                self.reactor
+                    .looper
+                    .epoll_ctl(EPOLL_CTL_DEL, self.fd, 0, std::ptr::null_mut(), None)
+            };
+            *events = 0;
+        }
     }
 }
 
@@ -860,3 +868,25 @@ impl fmt::Display for TryIoError {
 }
 
 impl std::error::Error for TryIoError {}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn stale_callbacks_cannot_access_dropped_or_reused_registrations() {
+        for _ in 0..128 {
+            let (socket, _peer) = UnixStream::pair().unwrap();
+            socket.set_nonblocking(true).unwrap();
+            let fd = AsyncFd::new(socket).unwrap();
+            let token = fd.state.token;
+            drop(fd);
+            assert!(!registrations().lock().unwrap().contains_key(&token));
+            // This is exactly the data an already-fetched epoll batch retains.
+            unsafe {
+                readiness_callback(token as *mut c_void, EPOLLIN | EPOLLOUT);
+            }
+        }
+    }
+}

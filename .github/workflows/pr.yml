@@ -70,3 +70,24 @@ jobs:
         run: >-
           cargo clippy --locked --workspace --all-targets --all-features
           --target ${{ matrix.target }} -- -D warnings
+
+  runtime-tests:
+    name: Runtime regressions (upstream FFRT)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runtime-regressions
+
+      - name: Build FFRT and execute tests
+        run: scripts/test-linux.sh

@@ -406,19 +406,18 @@ pub struct File {
     operation: Option<FileOperation>,
     pending_seek: Option<SeekFrom>,
     max_buf_size: usize,
+    buffered_read: std::collections::VecDeque<u8>,
 }
 
 enum FileOperation {
     Read(JoinHandle<io::Result<(usize, Vec<u8>)>>),
     Write(JoinHandle<io::Result<usize>>),
-    Flush(JoinHandle<io::Result<()>>),
     Seek(JoinHandle<io::Result<u64>>),
 }
 
 enum CompletedOperation {
     Read(io::Result<(usize, Vec<u8>)>),
     Write(io::Result<usize>),
-    Flush(io::Result<()>),
     Seek(io::Result<u64>),
 }
 
@@ -429,6 +428,7 @@ impl File {
             operation: None,
             pending_seek: None,
             max_buf_size: 2 * 1024 * 1024,
+            buffered_read: std::collections::VecDeque::new(),
         }
     }
 
@@ -484,7 +484,15 @@ impl File {
             let operation = std::future::poll_fn(|cx| self.poll_operation(cx))
                 .await
                 .expect("file operation missing");
-            let _ = discard_operation(operation);
+            let _ = self.finish_operation(operation);
+        }
+        if !self.buffered_read.is_empty() {
+            let unread = self.buffered_read.len() as i64;
+            let inner = self.inner.clone();
+            run_blocking(move || inner.lock().unwrap().seek(SeekFrom::Current(-unread)))
+                .await
+                .expect("failed to restore buffered file position");
+            self.buffered_read.clear();
         }
         self.try_into_std()
             .unwrap_or_else(|_| panic!("file still has outstanding references"))
@@ -492,7 +500,10 @@ impl File {
 
     /// Converts immediately when no asynchronous operation is outstanding.
     pub fn try_into_std(self) -> Result<std::fs::File, Self> {
-        if self.operation.is_some() || Arc::strong_count(&self.inner) != 1 {
+        if self.operation.is_some()
+            || !self.buffered_read.is_empty()
+            || Arc::strong_count(&self.inner) != 1
+        {
             return Err(self);
         }
         let File {
@@ -500,6 +511,7 @@ impl File {
             operation: _,
             pending_seek: _,
             max_buf_size: _,
+            buffered_read: _,
         } = self;
         match Arc::try_unwrap(inner) {
             Ok(inner) => Ok(inner.into_inner()),
@@ -509,7 +521,7 @@ impl File {
 
     /// Configures the maximum temporary buffer used by async file operations.
     pub fn set_max_buf_size(&mut self, max_buf_size: usize) {
-        self.max_buf_size = max_buf_size;
+        self.max_buf_size = max_buf_size.max(1);
     }
 
     /// Returns the maximum temporary buffer size used for file operations.
@@ -529,6 +541,7 @@ impl File {
 
     /// Reads the entire file into a byte vector.
     pub async fn read_to_end_owned(&self) -> io::Result<Vec<u8>> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || {
             let mut guard = inner.lock().unwrap();
@@ -541,6 +554,7 @@ impl File {
 
     /// Reads up to `buf.len()` bytes and returns bytes read plus the buffer.
     pub async fn read_owned(&self, buf: Vec<u8>) -> io::Result<(usize, Vec<u8>)> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || {
             let mut guard = inner.lock().unwrap();
@@ -553,6 +567,7 @@ impl File {
 
     /// Writes all bytes.
     pub async fn write_all_owned(&self, data: Vec<u8>) -> io::Result<()> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || {
             let mut guard = inner.lock().unwrap();
@@ -563,6 +578,7 @@ impl File {
 
     /// Flushes the file.
     pub async fn sync_all(&self) -> io::Result<()> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || {
             let guard = inner.lock().unwrap();
@@ -572,21 +588,25 @@ impl File {
     }
 
     pub async fn sync_data(&self) -> io::Result<()> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || inner.lock().unwrap().sync_data()).await
     }
 
     pub async fn set_len(&self, size: u64) -> io::Result<()> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || inner.lock().unwrap().set_len(size)).await
     }
 
     pub async fn set_permissions(&self, permissions: std::fs::Permissions) -> io::Result<()> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         run_blocking(move || inner.lock().unwrap().set_permissions(permissions)).await
     }
 
     pub async fn try_clone(&self) -> io::Result<Self> {
+        self.wait_for_operation().await;
         let inner = self.inner.clone();
         let file = run_blocking(move || inner.lock().unwrap().try_clone()).await?;
         Ok(Self::from_inner(file))
@@ -611,13 +631,6 @@ impl File {
                 }
                 Poll::Pending => return Poll::Pending,
             },
-            FileOperation::Flush(handle) => match Pin::new(handle).poll(cx) {
-                Poll::Ready(Ok(result)) => CompletedOperation::Flush(result),
-                Poll::Ready(Err(error)) => {
-                    CompletedOperation::Flush(Err(io::Error::other(error.to_string())))
-                }
-                Poll::Pending => return Poll::Pending,
-            },
             FileOperation::Seek(handle) => match Pin::new(handle).poll(cx) {
                 Poll::Ready(Ok(result)) => CompletedOperation::Seek(result),
                 Poll::Ready(Err(error)) => {
@@ -637,12 +650,33 @@ impl From<std::fs::File> for File {
     }
 }
 
-fn discard_operation(operation: CompletedOperation) -> io::Result<()> {
-    match operation {
-        CompletedOperation::Read(result) => result.map(drop),
-        CompletedOperation::Write(result) => result.map(drop),
-        CompletedOperation::Flush(result) => result,
-        CompletedOperation::Seek(result) => result.map(drop),
+impl File {
+    fn finish_operation(&mut self, operation: CompletedOperation) -> io::Result<()> {
+        match operation {
+            CompletedOperation::Read(result) => {
+                let (amount, bytes) = result?;
+                self.buffered_read.extend(&bytes[..amount]);
+                Ok(())
+            }
+            CompletedOperation::Write(result) => result.map(drop),
+            CompletedOperation::Seek(result) => result.map(drop),
+        }
+    }
+
+    async fn wait_for_operation(&self) {
+        if let Some(operation) = &self.operation {
+            loop {
+                let done = match operation {
+                    FileOperation::Read(handle) => handle.is_finished(),
+                    FileOperation::Write(handle) => handle.is_finished(),
+                    FileOperation::Seek(handle) => handle.is_finished(),
+                };
+                if done {
+                    break;
+                }
+                crate::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        }
     }
 }
 
@@ -653,11 +687,18 @@ impl AsyncRead for File {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
         loop {
-            if this.operation.is_none() {
-                if buf.remaining() == 0 {
-                    return Poll::Ready(Ok(()));
+            if !this.buffered_read.is_empty() {
+                let amount = buf.remaining().min(this.buffered_read.len());
+                for byte in this.buffered_read.drain(..amount) {
+                    buf.put_slice(&[byte]);
                 }
+                return Poll::Ready(Ok(()));
+            }
+            if this.operation.is_none() {
                 let inner = this.inner.clone();
                 let capacity = buf.remaining().min(this.max_buf_size);
                 this.operation = Some(FileOperation::Read(crate::spawn_blocking(move || {
@@ -666,13 +707,11 @@ impl AsyncRead for File {
                     Ok((amount, bytes))
                 })));
             }
-            match ready!(this.poll_operation(cx)).expect("file operation missing") {
-                CompletedOperation::Read(Ok((amount, bytes))) => {
-                    buf.put_slice(&bytes[..amount]);
-                    return Poll::Ready(Ok(()));
-                }
-                CompletedOperation::Read(Err(error)) => return Poll::Ready(Err(error)),
-                other => discard_operation(other)?,
+            let operation = ready!(this.poll_operation(cx)).expect("file operation missing");
+            let eof = matches!(&operation, CompletedOperation::Read(Ok((0, _))));
+            this.finish_operation(operation)?;
+            if eof {
+                return Poll::Ready(Ok(()));
             }
         }
     }
@@ -685,38 +724,36 @@ impl AsyncWrite for File {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
-        loop {
-            if this.operation.is_none() {
-                if buf.is_empty() {
-                    return Poll::Ready(Ok(0));
-                }
-                let inner = this.inner.clone();
-                let bytes = buf[..buf.len().min(this.max_buf_size)].to_vec();
-                this.operation = Some(FileOperation::Write(crate::spawn_blocking(move || {
-                    inner.lock().unwrap().write(&bytes)
-                })));
-            }
-            match ready!(this.poll_operation(cx)).expect("file operation missing") {
-                CompletedOperation::Write(result) => return Poll::Ready(result),
-                other => discard_operation(other)?,
-            }
+        while let Some(operation) = ready!(this.poll_operation(cx)) {
+            this.finish_operation(operation)?;
         }
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+        let amount = buf.len().min(this.max_buf_size);
+        let bytes = buf[..amount].to_vec();
+        let inner = this.inner.clone();
+        let unread = this.buffered_read.len() as i64;
+        this.buffered_read.clear();
+        this.operation = Some(FileOperation::Write(crate::spawn_blocking(move || {
+            let mut file = inner.lock().unwrap();
+            if unread != 0 {
+                file.seek(SeekFrom::Current(-unread))?;
+            }
+            file.write_all(&bytes)?;
+            Ok(amount)
+        })));
+        // Ownership of exactly these bytes has been accepted. Pending never
+        // accepts a new buffer; flush waits for the actual blocking write.
+        Poll::Ready(Ok(amount))
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        loop {
-            if this.operation.is_none() {
-                let inner = this.inner.clone();
-                this.operation = Some(FileOperation::Flush(crate::spawn_blocking(move || {
-                    inner.lock().unwrap().flush()
-                })));
-            }
-            match ready!(this.poll_operation(cx)).expect("file operation missing") {
-                CompletedOperation::Flush(result) => return Poll::Ready(result),
-                other => discard_operation(other)?,
-            }
+        while let Some(operation) = ready!(this.poll_operation(cx)) {
+            this.finish_operation(operation)?;
         }
+        Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -727,7 +764,7 @@ impl AsyncWrite for File {
 impl AsyncSeek for File {
     fn start_seek(self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         let this = self.get_mut();
-        if this.pending_seek.is_some() {
+        if this.pending_seek.is_some() || matches!(this.operation, Some(FileOperation::Seek(_))) {
             return Err(io::Error::other("another file seek is already in progress"));
         }
         this.pending_seek = Some(position);
@@ -738,7 +775,17 @@ impl AsyncSeek for File {
         let this = self.get_mut();
         loop {
             if this.operation.is_none() {
-                let position = this.pending_seek.take().unwrap_or(SeekFrom::Current(0));
+                let mut position = this.pending_seek.take().unwrap_or(SeekFrom::Current(0));
+                if let SeekFrom::Current(offset) = position {
+                    let Some(offset) = offset.checked_sub(this.buffered_read.len() as i64) else {
+                        return Poll::Ready(Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "seek offset overflow",
+                        )));
+                    };
+                    position = SeekFrom::Current(offset);
+                }
+                this.buffered_read.clear();
                 let inner = this.inner.clone();
                 this.operation = Some(FileOperation::Seek(crate::spawn_blocking(move || {
                     inner.lock().unwrap().seek(position)
@@ -746,8 +793,130 @@ impl AsyncSeek for File {
             }
             match ready!(this.poll_operation(cx)).expect("file operation missing") {
                 CompletedOperation::Seek(result) => return Poll::Ready(result),
-                other => discard_operation(other)?,
+                other => this.finish_operation(other)?,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    use crate::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+    use std::task::Waker;
+
+    fn file() -> (std::path::PathBuf, File) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let name = format!(
+            "ffrt-file-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let path = std::env::temp_dir().join(name);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        (path, File::from_std(file))
+    }
+
+    #[test]
+    fn cancelled_read_accepts_a_smaller_destination_without_losing_bytes() {
+        let (path, mut file) = file();
+        let (tx, handle) = crate::runtime::local_join_channel();
+        file.operation = Some(FileOperation::Read(handle));
+        let mut cx = Context::from_waker(Waker::noop());
+        let mut original = [0; 8];
+        assert!(
+            Pin::new(&mut file)
+                .poll_read(&mut cx, &mut ReadBuf::new(&mut original))
+                .is_pending()
+        );
+        // Complete the read only after its original borrowing future is gone.
+        tx.send(Ok(Ok((8, b"abcdefgh".to_vec())))).unwrap();
+        let mut output = Vec::new();
+        for _ in 0..4 {
+            let mut small = [0; 2];
+            let mut buf = ReadBuf::new(&mut small);
+            assert!(matches!(
+                Pin::new(&mut file).poll_read(&mut cx, &mut buf),
+                Poll::Ready(Ok(()))
+            ));
+            output.extend_from_slice(buf.filled());
+        }
+        assert_eq!(output, b"abcdefgh");
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn pending_write_does_not_accept_the_cancelled_callers_buffer() {
+        let (path, mut file) = file();
+        let (tx, handle) = crate::runtime::local_join_channel();
+        file.operation = Some(FileOperation::Write(handle));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(
+            Pin::new(&mut file)
+                .poll_write(&mut cx, b"cancelled-long-buffer")
+                .is_pending()
+        );
+        tx.send(Ok(Ok(100))).unwrap();
+        assert!(matches!(
+            Pin::new(&mut file).poll_write(&mut cx, b"new"),
+            Poll::Ready(Ok(3))
+        ));
+        crate::Runtime::new()
+            .unwrap()
+            .block_on(file.flush())
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn buffered_reads_preserve_logical_seek_and_write_positions() {
+        crate::Runtime::new().unwrap().block_on(async {
+            let (path, mut file) = file();
+            file.write_all(b"abcdef").await.unwrap();
+            file.flush().await.unwrap();
+            file.seek(SeekFrom::Start(0)).await.unwrap();
+            // Model a completed six-byte read whose caller consumed only two.
+            let mut bytes = vec![0; 6];
+            file.inner.lock().unwrap().read_exact(&mut bytes).unwrap();
+            file.buffered_read.extend(&bytes[2..]);
+            assert_eq!(file.stream_position().await.unwrap(), 2);
+            let mut next = [0; 2];
+            file.read_exact(&mut next).await.unwrap();
+            assert_eq!(&next, b"cd");
+            file.seek(SeekFrom::Start(0)).await.unwrap();
+            file.inner.lock().unwrap().read_exact(&mut bytes).unwrap();
+            file.buffered_read.extend(&bytes[2..]);
+            file.write_all(b"XY").await.unwrap();
+            file.flush().await.unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), b"abXYef");
+            drop(file);
+            std::fs::remove_file(path).unwrap();
+        });
+    }
+
+    #[test]
+    fn sync_all_waits_for_an_accepted_write_and_flush_reports_errors() {
+        crate::Runtime::new().unwrap().block_on(async {
+            let (path, mut file) = file();
+            file.set_max_buf_size(2);
+            file.write_all(b"abcdef").await.unwrap();
+            file.sync_all().await.unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), b"abcdef");
+            file.flush().await.unwrap();
+            drop(file);
+            let mut readonly = File::open(&path).await.unwrap();
+            assert_eq!(readonly.write(b"rejected").await.unwrap(), 8);
+            assert!(readonly.flush().await.is_err());
+            drop(readonly);
+            std::fs::remove_file(path).unwrap();
+        });
     }
 }

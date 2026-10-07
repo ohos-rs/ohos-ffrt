@@ -1,12 +1,10 @@
 #![allow(warnings)]
 
 use std::ptr;
-use std::sync::Arc;
 
 use ffrt_sys::{
     ffrt_alloc_auto_managed_function_storage_base, ffrt_function_header_t,
-    ffrt_function_kind_t_ffrt_function_kind_general, ffrt_submit_h_base, ffrt_task_handle_destroy,
-    ffrt_task_handle_t,
+    ffrt_function_kind_t_ffrt_function_kind_general, ffrt_submit_base,
 };
 
 use crate::TaskAttr;
@@ -23,16 +21,7 @@ struct TaskWrapper {
 
 #[derive(Clone)]
 pub struct Task {
-    handle: Option<Arc<TaskHandle>>,
     attr: TaskAttr,
-}
-
-struct TaskHandle(ffrt_task_handle_t);
-
-impl Drop for TaskHandle {
-    fn drop(&mut self) {
-        unsafe { ffrt_task_handle_destroy(self.0) };
-    }
 }
 
 impl Default for Task {
@@ -43,7 +32,7 @@ impl Default for Task {
 
 impl Task {
     pub fn new(attr: TaskAttr) -> Self {
-        Self { attr, handle: None }
+        Self { attr }
     }
 
     pub fn submit<F>(&self, func: F)
@@ -55,6 +44,8 @@ impl Task {
                 ffrt_function_kind_t_ffrt_function_kind_general,
             )
         } as *mut TaskWrapper;
+
+        assert!(!storage.is_null(), "failed to allocate FFRT task");
 
         let func_wrapper = Box::new(FuncWrapper {
             func: Box::new(func),
@@ -73,8 +64,8 @@ impl Task {
             ptr::write(ptr::addr_of_mut!((*storage).func_ptr), func_ptr);
         }
 
-        let _ = unsafe {
-            ffrt_submit_h_base(
+        unsafe {
+            ffrt_submit_base(
                 storage as *mut ffrt_function_header_t,
                 ptr::null(),
                 ptr::null(),

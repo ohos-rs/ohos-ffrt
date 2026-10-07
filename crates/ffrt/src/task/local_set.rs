@@ -54,7 +54,7 @@ struct LocalTask {
 }
 
 struct LocalJoin<F: Future> {
-    future: Pin<Box<F>>,
+    future: Option<Pin<Box<F>>>,
     sender: Option<crate::signal::oneshot::Sender<RuntimeResult<F::Output>>>,
     state: Arc<CancellationState>,
 }
@@ -64,8 +64,10 @@ impl<F: Future> Future for LocalJoin<F> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = &mut *self;
+        let _task_id = crate::runtime::CurrentTaskIdGuard::enter(this.state.id);
         this.state.register(cx.waker());
         if this.state.is_cancelled() {
+            this.future.take();
             this.state.finish();
             if let Some(sender) = this.sender.take() {
                 let _ = sender.send(Err(crate::JoinError::cancelled(this.state.id)));
@@ -73,8 +75,15 @@ impl<F: Future> Future for LocalJoin<F> {
             return Poll::Ready(());
         }
 
-        match catch_unwind(AssertUnwindSafe(|| this.future.as_mut().poll(cx))) {
+        match catch_unwind(AssertUnwindSafe(|| {
+            this.future
+                .as_mut()
+                .expect("completed local task polled")
+                .as_mut()
+                .poll(cx)
+        })) {
             Ok(Poll::Ready(output)) => {
+                this.future.take();
                 this.state.finish();
                 if let Some(sender) = this.sender.take() {
                     let _ = sender.send(Ok(output));
@@ -83,12 +92,24 @@ impl<F: Future> Future for LocalJoin<F> {
             }
             Ok(Poll::Pending) => Poll::Pending,
             Err(payload) => {
+                this.future.take();
                 this.state.finish();
                 if let Some(sender) = this.sender.take() {
                     let _ = sender.send(Err(crate::runtime::panic_error(this.state.id, payload)));
                 }
                 Poll::Ready(())
             }
+        }
+    }
+}
+
+impl<F: Future> Drop for LocalJoin<F> {
+    fn drop(&mut self) {
+        let _task_id = crate::runtime::CurrentTaskIdGuard::enter(self.state.id);
+        self.future.take();
+        self.state.finish();
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(Err(crate::JoinError::cancelled(self.state.id)));
         }
     }
 }
@@ -138,7 +159,7 @@ impl LocalSet {
         );
         self.tasks.borrow_mut().push_back(LocalTask {
             future: Box::pin(LocalJoin {
-                future: Box::pin(future),
+                future: Some(Box::pin(future)),
                 sender: Some(sender),
                 state,
             }),
@@ -222,10 +243,11 @@ impl Future for LocalSet {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = self.get_mut();
         let _context = this.enter();
+        *this.state.run_waker.lock().unwrap() = Some(cx.waker().clone());
         if this.poll_tasks(cx) {
+            this.state.run_waker.lock().unwrap().take();
             Poll::Ready(())
         } else {
-            *this.state.run_waker.lock().unwrap() = Some(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -243,12 +265,13 @@ impl<F: Future> Future for RunUntil<'_, F> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
         let _context = this.local.enter();
+        *this.local.state.run_waker.lock().unwrap() = Some(cx.waker().clone());
         let future = unsafe { Pin::new_unchecked(&mut this.future) };
         if let Poll::Ready(output) = future.poll(cx) {
+            this.local.state.run_waker.lock().unwrap().take();
             return Poll::Ready(output);
         }
         this.local.poll_tasks(cx);
-        *this.local.state.run_waker.lock().unwrap() = Some(cx.waker().clone());
         Poll::Pending
     }
 }
