@@ -9,7 +9,7 @@ description = "FFRT async runtime bindings"
 ffrt-sys = { workspace = true }
 libc = { workspace = true }
 bytes = { workspace = true }
-ffrt-macros = { workspace = true, optional = true }
+ffrt-macros = { workspace = true }
 tracing = { workspace = true, optional = true }
 
 [features]
@@ -30,7 +30,7 @@ full = [
 fs = []
 io-std = []
 io-util = []
-macros = ["dep:ffrt-macros"]
+macros = []
 net = []
 process = []
 rt = []

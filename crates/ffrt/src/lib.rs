@@ -5,6 +5,9 @@ extern crate self as ffrt;
 #[cfg(feature = "macros")]
 pub use ffrt_macros::{main, test};
 
+#[doc(hidden)]
+pub use ffrt_macros::__select;
+
 mod macros;
 
 pub mod fs;
@@ -25,6 +28,9 @@ pub mod sync;
 
 /// Tokio-style time compatibility module.
 pub mod time {
+    pub mod error {
+        pub use crate::timer::timeout::Elapsed;
+    }
     pub use std::time::{Duration, Instant};
 
     pub use crate::timer::Sleep;

@@ -93,7 +93,7 @@ fn expand(args: TokenStream, input: TokenStream, is_test: bool) -> TokenStream {
             .into_compile_error()
             .into();
     }
-    if !function.sig.inputs.is_empty() {
+    if (is_test || function.sig.ident == "main") && !function.sig.inputs.is_empty() {
         return syn::Error::new_spanned(
             &function.sig.inputs,
             "runtime functions cannot accept arguments",
@@ -159,4 +159,12 @@ fn expand(args: TokenStream, input: TokenStream, is_test: bool) -> TokenStream {
     }
 
     quote!(#function).into()
+}
+
+mod select;
+
+#[doc(hidden)]
+#[proc_macro]
+pub fn __select(input: TokenStream) -> TokenStream {
+    select::expand(parse_macro_input!(input as select::Select)).into()
 }
