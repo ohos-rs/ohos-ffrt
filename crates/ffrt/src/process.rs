@@ -16,18 +16,6 @@ use crate::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use crate::lock::Mutex;
 use crate::reactor::{AsyncFd, Interest};
 
-fn runtime_error(error: crate::JoinError) -> io::Error {
-    io::Error::other(error.to_string())
-}
-
-async fn run_blocking<F, R>(func: F) -> io::Result<R>
-where
-    F: FnOnce() -> io::Result<R> + Send + 'static,
-    R: Send + 'static,
-{
-    crate::spawn_blocking(func).await.map_err(runtime_error)?
-}
-
 fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     let status = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     if status < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, status | libc::O_NONBLOCK) } < 0 {
@@ -257,8 +245,14 @@ impl Child {
         // Match Tokio: close stdin before waiting to avoid a child blocked on
         // input that can no longer be supplied by the caller.
         self.stdin.take();
-        let inner = self.inner.clone();
-        run_blocking(move || inner.lock().unwrap().wait()).await
+        loop {
+            if let Some(status) = self.try_wait()? {
+                return Ok(status);
+            }
+            // WNOHANG never holds the child lock while the process is running.
+            // Cancelling this wait drops only its timer, leaving kill usable.
+            crate::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 
     pub async fn wait_with_output(mut self) -> io::Result<Output> {
@@ -294,6 +288,19 @@ impl Drop for Child {
     fn drop(&mut self) {
         if self.kill_on_drop {
             let _ = self.inner.lock().unwrap().kill();
+        }
+        if matches!(self.inner.lock().unwrap().try_wait(), Ok(None)) {
+            // Keep reaping detached children without blocking Drop or an FFRT
+            // worker for the rest of the child's lifetime.
+            let child = self.inner.clone();
+            drop(crate::spawn(async move {
+                loop {
+                    if !matches!(child.lock().unwrap().try_wait(), Ok(None)) {
+                        break;
+                    }
+                    crate::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            }));
         }
     }
 }

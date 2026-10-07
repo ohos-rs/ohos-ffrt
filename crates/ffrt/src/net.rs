@@ -56,9 +56,12 @@ fn try_read_buf<B: BufMut>(
 ) -> io::Result<usize> {
     let result = {
         let chunk = buf.chunk_mut();
-        // SAFETY: `chunk` describes writable spare capacity. The operation may
-        // initialize at most its reported length, which is advanced below.
-        let slice = unsafe { std::slice::from_raw_parts_mut(chunk.as_mut_ptr(), chunk.len()) };
+        // The Read-style operation receives initialized u8s, even when BufMut
+        // exposes uninitialized spare capacity (for example BytesMut/Vec).
+        let slice = unsafe {
+            std::ptr::write_bytes(chunk.as_mut_ptr(), 0, chunk.len());
+            std::slice::from_raw_parts_mut(chunk.as_mut_ptr(), chunk.len())
+        };
         operation(slice)
     };
     let amount = result?;
@@ -1663,5 +1666,21 @@ async fn connect_addr(address: SocketAddr) -> io::Result<std::net::TcpStream> {
     match result {
         Ok(result) => result,
         Err(error) => Err(io::Error::other(error.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod buffer_regressions {
+    #[test]
+    fn read_buf_initializes_spare_capacity_before_exposing_a_slice() {
+        let mut bytes = Vec::with_capacity(8);
+        let amount = super::try_read_buf(&mut bytes, |slice| {
+            assert!(slice.iter().all(|byte| *byte == 0));
+            slice[..3].copy_from_slice(b"abc");
+            Ok(3)
+        })
+        .unwrap();
+        assert_eq!(amount, 3);
+        assert_eq!(bytes, b"abc");
     }
 }
