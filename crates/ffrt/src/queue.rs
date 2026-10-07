@@ -17,6 +17,8 @@ use ffrt_sys::{
 #[cfg(feature = "api-20")]
 use ffrt_sys::{ffrt_queue_attr_get_thread_mode, ffrt_queue_attr_set_thread_mode};
 
+use std::sync::Arc;
+
 use crate::{Qos, TaskAttr};
 
 /// FFRT queue type.
@@ -192,17 +194,25 @@ where
 }
 
 /// A handle to an FFRT queue.
+#[derive(Clone)]
 pub struct Queue {
-    inner: ffrt_queue_t,
+    inner: Arc<QueueInner>,
+}
+
+struct QueueInner {
+    handle: ffrt_queue_t,
     owned: bool,
 }
+
+unsafe impl Send for QueueInner {}
+unsafe impl Sync for QueueInner {}
 
 unsafe impl Send for Queue {}
 unsafe impl Sync for Queue {}
 
 impl Queue {
     pub(crate) fn as_raw(&self) -> ffrt_queue_t {
-        self.inner
+        self.inner.handle
     }
 
     /// Creates an FFRT queue.
@@ -218,16 +228,20 @@ impl Queue {
         assert!(!queue.is_null(), "failed to create FFRT queue");
 
         Self {
-            inner: queue,
-            owned: true,
+            inner: Arc::new(QueueInner {
+                handle: queue,
+                owned: true,
+            }),
         }
     }
 
     fn from_borrowed(queue: ffrt_queue_t) -> Self {
         assert!(!queue.is_null(), "FFRT queue handle is null");
         Self {
-            inner: queue,
-            owned: false,
+            inner: Arc::new(QueueInner {
+                handle: queue,
+                owned: false,
+            }),
         }
     }
 
@@ -257,7 +271,7 @@ impl Queue {
         let task = prepare_task(func);
         unsafe {
             ffrt_queue_submit(
-                self.inner,
+                self.as_raw(),
                 task as *mut ffrt_function_header_t,
                 attr.map(|a| a.inner.as_ptr()).unwrap_or(ptr::null_mut()),
             );
@@ -280,7 +294,7 @@ impl Queue {
         let task = prepare_task(func);
         let handle = unsafe {
             ffrt_queue_submit_h(
-                self.inner,
+                self.as_raw(),
                 task as *mut ffrt_function_header_t,
                 attr.map(|a| a.inner.as_ptr()).unwrap_or(ptr::null_mut()),
             )
@@ -289,10 +303,10 @@ impl Queue {
     }
 }
 
-impl Drop for Queue {
+impl Drop for QueueInner {
     fn drop(&mut self) {
         if self.owned {
-            unsafe { ffrt_queue_destroy(self.inner) };
+            unsafe { ffrt_queue_destroy(self.handle) };
         }
     }
 }

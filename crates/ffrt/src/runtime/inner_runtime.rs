@@ -138,7 +138,7 @@ impl Runtime {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let name = attr.get_name().to_owned();
+        let name = attr.get_name();
         self.spawn_task(Task::new(attr), future, Some(&name), Location::caller())
     }
 
@@ -630,12 +630,12 @@ pub fn try_id() -> Option<Id> {
     CURRENT_TASK_ID.with(Cell::get)
 }
 
-struct CurrentTaskIdGuard {
+pub(crate) struct CurrentTaskIdGuard {
     previous: Option<Id>,
 }
 
 impl CurrentTaskIdGuard {
-    fn enter(id: Id) -> Self {
+    pub(crate) fn enter(id: Id) -> Self {
         let previous = CURRENT_TASK_ID.with(|current| current.replace(Some(id)));
         Self { previous }
     }

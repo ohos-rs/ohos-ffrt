@@ -32,8 +32,17 @@ pub const EPOLLHUP: u32 = 0x010;
 
 /// An owned FFRT event loop.
 pub struct Looper {
-    inner: ffrt_loop_t,
+    inner: Arc<LoopInner>,
 }
+
+struct LoopInner {
+    handle: ffrt_loop_t,
+    _queue: Queue,
+    running: AtomicBool,
+}
+
+unsafe impl Send for LoopInner {}
+unsafe impl Sync for LoopInner {}
 
 unsafe impl Send for Looper {}
 unsafe impl Sync for Looper {}
@@ -43,26 +52,37 @@ impl Looper {
     pub fn new(queue: &Queue) -> Self {
         let inner = unsafe { ffrt_loop_create(queue.as_raw()) };
         assert!(!inner.is_null(), "failed to create FFRT loop");
-        Self { inner }
+        Self {
+            inner: Arc::new(LoopInner {
+                handle: inner,
+                _queue: queue.clone(),
+                running: AtomicBool::new(false),
+            }),
+        }
     }
 
     /// Starts the loop. This call blocks until [`Looper::stop`] is called.
     pub fn run(&self) -> Result<(), c_int> {
-        let ret = unsafe { ffrt_loop_run(self.inner) };
+        if self.inner.running.swap(true, Ordering::AcqRel) {
+            return Err(-1);
+        }
+        let ret = unsafe { ffrt_loop_run(self.inner.handle) };
+        self.inner.running.store(false, Ordering::Release);
         if ret == 0 { Ok(()) } else { Err(ret) }
     }
 
     /// Stops a running loop.
     pub fn stop(&self) {
-        unsafe { ffrt_loop_stop(self.inner) };
+        unsafe { ffrt_loop_stop(self.inner.handle) };
     }
 
     /// Registers, modifies, or removes an epoll fd on the loop.
     ///
     /// # Safety
     ///
-    /// `data` must remain valid until the callback is removed with
-    /// `EPOLL_CTL_DEL` or the loop is destroyed.
+    /// `data` must remain valid until every callback that could have been
+    /// returned by the loop's current event batch has finished. `EPOLL_CTL_DEL`
+    /// does not wait for those callbacks. The loop must outlive registrations.
     pub unsafe fn epoll_ctl(
         &self,
         op: c_int,
@@ -71,7 +91,7 @@ impl Looper {
         data: *mut c_void,
         cb: ffrt_poller_cb,
     ) -> Result<(), c_int> {
-        let ret = unsafe { ffrt_loop_epoll_ctl(self.inner, op, fd, events, data, cb) };
+        let ret = unsafe { ffrt_loop_epoll_ctl(self.inner.handle, op, fd, events, data, cb) };
         if ret == 0 { Ok(()) } else { Err(ret) }
     }
 
@@ -96,7 +116,7 @@ impl Looper {
 
         let handle = unsafe {
             ffrt_loop_timer_start(
-                self.inner,
+                self.inner.handle,
                 timeout_ms,
                 callback_data.cast_mut().cast::<c_void>(),
                 Some(timer_callback),
@@ -110,7 +130,7 @@ impl Looper {
         }
 
         Ok(LooperTimer {
-            looper: self.inner,
+            looper: self.inner.clone(),
             inner: handle,
             data,
             active: true,
@@ -130,15 +150,15 @@ impl Looper {
     }
 }
 
-impl Drop for Looper {
+impl Drop for LoopInner {
     fn drop(&mut self) {
-        unsafe { ffrt_loop_destroy(self.inner) };
+        unsafe { ffrt_loop_destroy(self.handle) };
     }
 }
 
 /// Handle to a timer running on a [`Looper`].
 pub struct LooperTimer {
-    looper: ffrt_loop_t,
+    looper: Arc<LoopInner>,
     inner: ffrt_timer_t,
     data: Arc<TimerData>,
     active: bool,
@@ -152,7 +172,7 @@ impl LooperTimer {
             return Ok(());
         }
 
-        let ret = unsafe { ffrt_loop_timer_stop(self.looper, self.inner) };
+        let ret = unsafe { ffrt_loop_timer_stop(self.looper.handle, self.inner) };
         if ret == 0 {
             self.active = false;
             self.data.release_registration();

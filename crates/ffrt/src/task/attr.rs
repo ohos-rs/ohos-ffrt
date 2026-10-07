@@ -1,15 +1,17 @@
+use std::ffi::CString;
 use std::ptr::NonNull;
 
 use ffrt_sys::{
-    ffrt_error_t_ffrt_success, ffrt_task_attr_get_delay, ffrt_task_attr_get_name,
-    ffrt_task_attr_get_qos, ffrt_task_attr_get_queue_priority, ffrt_task_attr_get_stack_size,
-    ffrt_task_attr_init, ffrt_task_attr_set_delay, ffrt_task_attr_set_name, ffrt_task_attr_set_qos,
-    ffrt_task_attr_set_queue_priority, ffrt_task_attr_set_stack_size, ffrt_task_attr_t,
+    ffrt_error_t_ffrt_success, ffrt_task_attr_destroy, ffrt_task_attr_get_delay,
+    ffrt_task_attr_get_name, ffrt_task_attr_get_qos, ffrt_task_attr_get_queue_priority,
+    ffrt_task_attr_get_stack_size, ffrt_task_attr_init, ffrt_task_attr_set_delay,
+    ffrt_task_attr_set_name, ffrt_task_attr_set_qos, ffrt_task_attr_set_queue_priority,
+    ffrt_task_attr_set_stack_size, ffrt_task_attr_t,
 };
 
 use crate::{Qos, TaskPriority};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct TaskAttr {
     pub(crate) inner: NonNull<ffrt_task_attr_t>,
 }
@@ -22,7 +24,6 @@ impl TaskAttr {
 
         let ret = unsafe { ffrt_task_attr_init(uninit.as_mut_ptr()) };
 
-        #[cfg(debug_assertions)]
         assert!(
             ret == ffrt_error_t_ffrt_success,
             "Failed to initialize task attribute"
@@ -37,12 +38,18 @@ impl TaskAttr {
     }
 
     pub fn set_name(&self, name: &str) {
-        unsafe { ffrt_task_attr_set_name(self.inner.as_ptr(), name.as_ptr() as _) };
+        let name = CString::new(name).expect("task name must not contain NUL");
+        unsafe { ffrt_task_attr_set_name(self.inner.as_ptr(), name.as_ptr()) };
     }
 
-    pub fn get_name(&self) -> &str {
+    pub fn get_name(&self) -> String {
         let name = unsafe { ffrt_task_attr_get_name(self.inner.as_ptr()) };
-        unsafe { std::ffi::CStr::from_ptr(name).to_str().unwrap() }
+        assert!(!name.is_null(), "FFRT returned a null task name");
+        unsafe {
+            std::ffi::CStr::from_ptr(name)
+                .to_string_lossy()
+                .into_owned()
+        }
     }
 
     pub fn set_qos(&self, qos: Qos) {
@@ -83,5 +90,26 @@ impl TaskAttr {
 impl Default for TaskAttr {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for TaskAttr {
+    fn clone(&self) -> Self {
+        let attr = Self::new();
+        attr.set_name(&self.get_name());
+        attr.set_qos(self.get_qos());
+        attr.set_delay(self.get_delay());
+        attr.set_priority(self.get_priority());
+        attr.set_stack_size(self.get_stack_size());
+        attr
+    }
+}
+
+impl Drop for TaskAttr {
+    fn drop(&mut self) {
+        unsafe {
+            ffrt_task_attr_destroy(self.inner.as_ptr());
+            drop(Box::from_raw(self.inner.as_ptr()));
+        }
     }
 }
