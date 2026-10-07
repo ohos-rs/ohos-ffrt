@@ -44,10 +44,13 @@ jobs:
           components: "native;toolchains"
           mirror: true
 
-      - name: Require API 26 SDK
+      - name: Verify API 26 SDK and native linker
         env:
           SDK_API: ${{ steps.sdk.outputs.api-version }}
-        run: test "$SDK_API" = '26'
+        run: |
+          test "$SDK_API" = '26'
+          test -x "${OHOS_SDK_NATIVE}/llvm/bin/x86_64-unknown-linux-ohos-clang"
+          "${OHOS_SDK_NATIVE}/llvm/bin/x86_64-unknown-linux-ohos-clang" --version
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -70,7 +73,7 @@ jobs:
       - name: Execute Rust binaries in QEMU three times
         run: |
           python3 scripts/qemu/run.py \
-            --guest target/qemu/guest/guest.json --ndk "${OHOS_NDK_HOME}" \
+            --guest target/qemu/guest/guest.json --ndk "${OHOS_SDK_NATIVE}" \
             --output target/qemu/results --repeat 3
 
       - name: Stop QEMU and HDC

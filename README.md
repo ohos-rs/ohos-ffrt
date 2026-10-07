@@ -126,6 +126,8 @@ On Linux x86_64, use `--arch x86_64 --accel kvm` and install the
 `x86_64-unknown-linux-ohos` Rust target. Boot requires access to `/dev/kvm`.
 Use a new output directory for each invocation. `boot.py --archive /path/to/image.tar.gz`
 reuses a local copy of the pinned release and still verifies its checksum.
+`--ndk` accepts the native component directory or its parent SDK root. With
+`setup-ohos-sdk`, use `OHOS_SDK_NATIVE`; `OHOS_NDK_HOME` points at the SDK root.
 
 To execute tests on an already connected arm64 OpenHarmony device or QEMU guest:
 

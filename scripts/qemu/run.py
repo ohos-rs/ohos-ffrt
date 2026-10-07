@@ -12,10 +12,22 @@ from common import hdc_environment, qmp_command
 TARGETS = {'arm64': 'aarch64-unknown-linux-ohos', 'x86_64': 'x86_64-unknown-linux-ohos'}
 
 
+def resolve_linker(ndk, target):
+    # setup-ohos-sdk exposes the SDK root as OHOS_NDK_HOME, whereas
+    # OHOS_SDK_NATIVE and DevEco's native directory point at the component.
+    root = ndk.resolve()
+    candidates = [directory / 'llvm' / 'bin' / (target + '-clang')
+                  for directory in (root, root / 'native')]
+    for linker in candidates:
+        if linker.is_file():
+            return linker
+    raise ValueError('OHOS linker not found; checked: ' + ', '.join(map(str, candidates)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--guest', type=Path, required=True)
-    parser.add_argument('--ndk', type=Path, required=True)
+    parser.add_argument('--ndk', type=Path, required=True, help='Native component directory or SDK root')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--repeat', type=int, default=3)
     args = parser.parse_args()
@@ -24,13 +36,14 @@ def main():
     guest = json.loads(args.guest.read_text())
     if not guest.get('ready') or guest['architecture'] not in TARGETS:
         parser.error('guest.json must describe a ready, supported OHOS guest')
+    target = TARGETS[guest['architecture']]
+    try:
+        linker = resolve_linker(args.ndk, target)
+    except ValueError as error:
+        parser.error(str(error))
     _, status = qmp_command(guest['qmp'], 'query-status')
     if not status.get('running'):
         raise RuntimeError('OHOS QEMU is not running')
-    target = TARGETS[guest['architecture']]
-    linker = args.ndk.resolve() / 'llvm' / 'bin' / (target + '-clang')
-    if not linker.is_file():
-        parser.error('OHOS linker not found: ' + str(linker))
     repo = Path(__file__).resolve().parents[2]
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -40,7 +53,7 @@ def main():
     env[prefix + '_RUNNER'] = shlex.join([sys.executable, str(repo / 'scripts/ohos-runner.py')])
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
     evidence = {'revision': revision, 'guest': guest, 'target': target, 'repeat': args.repeat,
-                'status': 'running', 'commands': []}
+                'linker': str(linker), 'status': 'running', 'commands': []}
 
     def save():
         (output / 'results.json').write_text(json.dumps(evidence, indent=2) + '\n')

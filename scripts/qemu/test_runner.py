@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from boot import native_ready, verify_archive
 from common import qmp_command
+from run import resolve_linker
 
 SPEC = importlib.util.spec_from_file_location('ohos_runner', Path(__file__).parents[1] / 'ohos-runner.py')
 RUNNER = importlib.util.module_from_spec(SPEC)
@@ -154,6 +155,33 @@ class GuestTests(unittest.TestCase):
                 ['sudo', '-n', 'chown', f'{os.getuid()}:{os.getgid()}', '/private/qmp.sock'],
                 check=True, timeout=10)
             chmod.assert_called_once_with(0o600)
+
+
+class SdkLayoutTests(unittest.TestCase):
+    def test_setup_action_sdk_root_and_native_component_resolve_same_linker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            sdk = Path(temp)
+            linker = sdk / 'native/llvm/bin/x86_64-unknown-linux-ohos-clang'
+            linker.parent.mkdir(parents=True)
+            linker.touch()
+            self.assertEqual(resolve_linker(sdk, 'x86_64-unknown-linux-ohos'), linker.resolve())
+            self.assertEqual(resolve_linker(sdk / 'native', 'x86_64-unknown-linux-ohos'), linker.resolve())
+
+    def test_standalone_native_component_is_supported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            native = Path(temp)
+            linker = native / 'llvm/bin/aarch64-unknown-linux-ohos-clang'
+            linker.parent.mkdir(parents=True)
+            linker.touch()
+            self.assertEqual(resolve_linker(native, 'aarch64-unknown-linux-ohos'), linker.resolve())
+
+    def test_missing_target_reports_both_checked_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            sdk = Path(temp).resolve()
+            with self.assertRaises(ValueError) as failure:
+                resolve_linker(sdk, 'x86_64-unknown-linux-ohos')
+            for directory in (sdk, sdk / 'native'):
+                self.assertIn(str(directory / 'llvm/bin/x86_64-unknown-linux-ohos-clang'), str(failure.exception))
 
 
 if __name__ == '__main__':
