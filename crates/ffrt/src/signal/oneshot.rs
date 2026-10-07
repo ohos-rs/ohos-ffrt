@@ -60,6 +60,7 @@ pub mod error {
 /// # Examples
 ///
 /// ```no_run
+/// # ffrt::Runtime::new().unwrap().block_on(async {
 /// use ffrt::signal::oneshot;
 ///
 /// let (tx, rx) = oneshot::channel();
@@ -74,6 +75,7 @@ pub mod error {
 ///     Ok(value) => println!("Got: {}", value),
 ///     Err(_) => println!("Sender dropped"),
 /// }
+/// # });
 /// ```
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let shared = Arc::new(Shared::new());
@@ -329,7 +331,7 @@ impl<T> Receiver<T> {
                 drop(guard);
                 self.shared.take();
                 Ok(value)
-            } else if guard.inner().sender_alive {
+            } else if guard.inner().sender_alive && guard.inner().receiver_alive {
                 Err(TryRecvError::Empty)
             } else {
                 drop(guard);
@@ -368,7 +370,7 @@ impl<T> Receiver<T> {
                     return Ok(value);
                 }
 
-                if !guard.inner().sender_alive {
+                if !guard.inner().sender_alive || !guard.inner().receiver_alive {
                     return Err(RecvError);
                 }
 
@@ -386,7 +388,9 @@ impl<T> Receiver<T> {
     pub fn is_finished(&self) -> bool {
         if let Some(shared) = &self.shared {
             let guard = shared.lock();
-            guard.inner().value.is_some() || !guard.inner().sender_alive
+            guard.inner().value.is_some()
+                || !guard.inner().sender_alive
+                || !guard.inner().receiver_alive
         } else {
             true
         }
@@ -443,7 +447,7 @@ impl<T> Future for Receiver<T> {
                 return Poll::Ready(Ok(value));
             }
 
-            if !guard.inner().sender_alive {
+            if !guard.inner().sender_alive || !guard.inner().receiver_alive {
                 drop(guard);
                 this.shared.take();
                 return Poll::Ready(Err(RecvError));
@@ -492,7 +496,8 @@ mod tests {
 
     #[test]
     fn test_receiver_dropped() {
-        let (tx, _rx) = channel();
+        let (tx, rx) = channel();
+        drop(rx);
         assert!(tx.send(42).is_err());
     }
 }

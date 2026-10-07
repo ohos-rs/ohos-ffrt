@@ -29,3 +29,8 @@ pub use semaphore::{
     TryAcquireError,
 };
 pub use set_once::{SetOnce, SetOnceError};
+
+/// Named futures returned by synchronization primitives.
+pub mod futures {
+    pub use super::notify::{Notified, OwnedNotified};
+}

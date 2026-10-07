@@ -87,6 +87,9 @@ pub struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
 }
 
+// Shared guard access exposes &T, so T must also be Sync.
+unsafe impl<T: Send + Sync> Sync for MutexGuard<'_, T> {}
+
 impl<T> Deref for MutexGuard<'_, T> {
     type Target = T;
 

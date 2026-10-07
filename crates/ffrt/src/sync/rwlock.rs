@@ -458,10 +458,11 @@ impl<'a, T: ?Sized> RwLockReadGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&T) -> &U,
     {
+        let value = f(unsafe { &*this.value }) as *const _;
         let this = ManuallyDrop::new(this);
         RwLockReadGuard {
             lock: this.lock,
-            value: f(unsafe { &*this.value }),
+            value,
             release: this.release,
             _lifetime: PhantomData,
         }
@@ -473,10 +474,11 @@ impl<'a, T: ?Sized> RwLockReadGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&T) -> Option<&U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &*this.value }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *const _;
+        let this = ManuallyDrop::new(this);
         Ok(RwLockReadGuard {
             lock: this.lock,
             value,
@@ -512,10 +514,11 @@ impl<'a, T> RwLockWriteGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> &mut U,
     {
+        let value = f(unsafe { &mut *this.lock.value.get() }) as *mut _;
         let this = ManuallyDrop::new(this);
         RwLockMappedWriteGuard {
             lock: (this.lock as *const RwLock<T>).cast(),
-            value: f(unsafe { &mut *this.lock.value.get() }),
+            value,
             release: release_write_erased::<T>,
             _lifetime: PhantomData,
         }
@@ -527,10 +530,11 @@ impl<'a, T> RwLockWriteGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> Option<&mut U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.lock.value.get() }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         Ok(RwLockMappedWriteGuard {
             lock: (this.lock as *const RwLock<T>).cast(),
             value,
@@ -555,8 +559,8 @@ impl<'a, T> RwLockWriteGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&T) -> &U,
     {
+        let value = f(unsafe { &*this.lock.value.get() }) as *const _;
         let this = ManuallyDrop::new(this);
-        let value = f(unsafe { &*this.lock.value.get() });
         this.lock.downgrade_write();
         RwLockReadGuard {
             lock: (this.lock as *const RwLock<T>).cast(),
@@ -572,10 +576,11 @@ impl<'a, T> RwLockWriteGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&T) -> Option<&U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &*this.lock.value.get() }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *const _;
+        let this = ManuallyDrop::new(this);
         this.lock.downgrade_write();
         Ok(RwLockReadGuard {
             lock: (this.lock as *const RwLock<T>).cast(),
@@ -629,8 +634,8 @@ impl<T, U: ?Sized> OwnedRwLockReadGuard<T, U> {
         V: ?Sized,
         F: FnOnce(&U) -> &V,
     {
+        let value = f(unsafe { &*this.value }) as *const _;
         let this = ManuallyDrop::new(this);
-        let value = f(unsafe { &*this.value });
         let lock = unsafe { std::ptr::read(&this.lock) };
         OwnedRwLockReadGuard { lock, value }
     }
@@ -641,10 +646,11 @@ impl<T, U: ?Sized> OwnedRwLockReadGuard<T, U> {
         V: ?Sized,
         F: FnOnce(&U) -> Option<&V>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &*this.value }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *const _;
+        let this = ManuallyDrop::new(this);
         let lock = unsafe { std::ptr::read(&this.lock) };
         Ok(OwnedRwLockReadGuard { lock, value })
     }
@@ -681,8 +687,8 @@ impl<T> OwnedRwLockWriteGuard<T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> &mut U,
     {
+        let value = f(unsafe { &mut *this.lock.value.get() }) as *mut _;
         let this = ManuallyDrop::new(this);
-        let value = f(unsafe { &mut *this.lock.value.get() });
         let lock = unsafe { std::ptr::read(&this.lock) };
         OwnedRwLockMappedWriteGuard { lock, value }
     }
@@ -693,10 +699,11 @@ impl<T> OwnedRwLockWriteGuard<T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> Option<&mut U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.lock.value.get() }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         let lock = unsafe { std::ptr::read(&this.lock) };
         Ok(OwnedRwLockMappedWriteGuard { lock, value })
     }
@@ -717,8 +724,8 @@ impl<T> OwnedRwLockWriteGuard<T> {
         U: ?Sized,
         F: FnOnce(&T) -> &U,
     {
+        let value = f(unsafe { &*this.lock.value.get() }) as *const _;
         let this = ManuallyDrop::new(this);
-        let value = f(unsafe { &*this.lock.value.get() });
         this.lock.downgrade_write();
         let lock = unsafe { std::ptr::read(&this.lock) };
         OwnedRwLockReadGuard { lock, value }
@@ -730,10 +737,11 @@ impl<T> OwnedRwLockWriteGuard<T> {
         U: ?Sized,
         F: FnOnce(&T) -> Option<&U>,
     {
-        let this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &*this.lock.value.get() }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *const _;
+        let this = ManuallyDrop::new(this);
         this.lock.downgrade_write();
         let lock = unsafe { std::ptr::read(&this.lock) };
         Ok(OwnedRwLockReadGuard { lock, value })
@@ -782,10 +790,11 @@ impl<'a, T: ?Sized> RwLockMappedWriteGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> &mut U,
     {
-        let mut this = ManuallyDrop::new(this);
+        let value = f(unsafe { &mut *this.value }) as *mut _;
+        let this = ManuallyDrop::new(this);
         RwLockMappedWriteGuard {
             lock: this.lock,
-            value: f(unsafe { &mut *this.value }),
+            value,
             release: this.release,
             _lifetime: PhantomData,
         }
@@ -796,10 +805,11 @@ impl<'a, T: ?Sized> RwLockMappedWriteGuard<'a, T> {
         U: ?Sized,
         F: FnOnce(&mut T) -> Option<&mut U>,
     {
-        let mut this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.value }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         Ok(RwLockMappedWriteGuard {
             lock: this.lock,
             value,
@@ -849,8 +859,8 @@ impl<T, U: ?Sized> OwnedRwLockMappedWriteGuard<T, U> {
         V: ?Sized,
         F: FnOnce(&mut U) -> &mut V,
     {
-        let mut this = ManuallyDrop::new(this);
-        let value = f(unsafe { &mut *this.value });
+        let value = f(unsafe { &mut *this.value }) as *mut _;
+        let this = ManuallyDrop::new(this);
         let lock = unsafe { std::ptr::read(&this.lock) };
         OwnedRwLockMappedWriteGuard { lock, value }
     }
@@ -860,10 +870,11 @@ impl<T, U: ?Sized> OwnedRwLockMappedWriteGuard<T, U> {
         V: ?Sized,
         F: FnOnce(&mut U) -> Option<&mut V>,
     {
-        let mut this = ManuallyDrop::new(this);
         let Some(value) = f(unsafe { &mut *this.value }) else {
-            return Err(ManuallyDrop::into_inner(this));
+            return Err(this);
         };
+        let value = value as *mut _;
+        let this = ManuallyDrop::new(this);
         let lock = unsafe { std::ptr::read(&this.lock) };
         Ok(OwnedRwLockMappedWriteGuard { lock, value })
     }

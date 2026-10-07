@@ -313,7 +313,7 @@ impl<T> Clone for Receiver<T> {
         state.receivers += 1;
         Receiver {
             shared: self.shared.clone(),
-            seen: state.version,
+            seen: self.seen,
         }
     }
 }

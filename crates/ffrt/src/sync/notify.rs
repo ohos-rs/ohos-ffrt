@@ -2,17 +2,23 @@ use crate::lock::LazyMutex;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll, Waker};
 
+const WAITING: u8 = 0;
+const ONE: u8 = 1;
+const ALL: u8 = 2;
+const CONSUMED: u8 = 3;
+
 struct Waiter {
-    notified: Weak<AtomicBool>,
+    notified: Weak<AtomicU8>,
     waker: Waker,
 }
 
 struct NotifyState {
     permit: bool,
+    generation: u64,
     waiters: VecDeque<Waiter>,
 }
 
@@ -26,116 +32,134 @@ impl Notify {
         Self::const_new()
     }
 
-    /// Creates a notification primitive that can be used in a static.
     pub const fn const_new() -> Self {
         Self {
             state: LazyMutex::new(NotifyState {
                 permit: false,
+                generation: 0,
                 waiters: VecDeque::new(),
             }),
         }
     }
 
-    /// Notifies the oldest live waiter, or stores one permit.
     pub fn notify_one(&self) {
         self.notify(false);
     }
-
-    /// Notifies the newest live waiter, or stores one permit.
     pub fn notify_last(&self) {
         self.notify(true);
     }
 
     fn notify(&self, last: bool) {
-        let mut state = self.state.lock().unwrap();
-        loop {
-            let waiter = if last {
-                state.waiters.pop_back()
-            } else {
-                state.waiters.pop_front()
-            };
-            let Some(waiter) = waiter else {
-                state.permit = true;
-                return;
-            };
-            if let Some(notified) = waiter.notified.upgrade() {
-                notified.store(true, Ordering::Release);
-                waiter.waker.wake();
-                return;
-            }
+        let waker = notify_locked(&mut self.state.lock().unwrap(), last);
+        if let Some(waker) = waker {
+            waker.wake();
         }
     }
 
-    /// Notifies every waiter that has already registered.
+    /// Notifies every future created before this call, including unpolled ones.
     pub fn notify_waiters(&self) {
-        let waiters = {
+        let wakers = {
             let mut state = self.state.lock().unwrap();
-            state.waiters.drain(..).collect::<Vec<_>>()
+            state.generation = state.generation.wrapping_add(1);
+            state
+                .waiters
+                .drain(..)
+                .filter_map(|waiter| {
+                    let notified = waiter.notified.upgrade()?;
+                    notified.store(ALL, Ordering::Release);
+                    Some(waiter.waker)
+                })
+                .collect::<Vec<_>>()
         };
-        for waiter in waiters {
-            if let Some(notified) = waiter.notified.upgrade() {
-                notified.store(true, Ordering::Release);
-                waiter.waker.wake();
-            }
+        for waker in wakers {
+            waker.wake();
         }
     }
 
     pub fn notified(&self) -> Notified<'_> {
         Notified {
             notify: self,
-            notified: Arc::new(AtomicBool::new(false)),
-            registered: false,
+            state: FutureState::new(self),
         }
     }
 
     pub fn notified_owned(self: Arc<Self>) -> OwnedNotified {
+        let state = FutureState::new(&self);
         OwnedNotified {
             notify: self,
-            notified: Arc::new(AtomicBool::new(false)),
-            registered: false,
+            state,
         }
     }
 
-    fn poll_notified(
-        &self,
-        notified: &Arc<AtomicBool>,
-        registered: &mut bool,
-        cx: &mut Context<'_>,
-    ) -> Poll<()> {
-        if notified.load(Ordering::Acquire) {
+    fn poll_notified(&self, future: &mut FutureState, waker: Option<&Waker>) -> Poll<()> {
+        let mut state = self.state.lock().unwrap();
+        if future.notified.load(Ordering::Acquire) != WAITING
+            || future.generation != state.generation
+        {
+            remove_waiter(&mut state, &future.notified);
+            future.notified.store(CONSUMED, Ordering::Release);
             return Poll::Ready(());
         }
-
-        let mut state = self.state.lock().unwrap();
         if state.permit {
             state.permit = false;
+            remove_waiter(&mut state, &future.notified);
+            future.notified.store(CONSUMED, Ordering::Release);
             return Poll::Ready(());
         }
-
-        if *registered {
-            if let Some(waiter) = state.waiters.iter_mut().find(|waiter| {
-                waiter
-                    .notified
-                    .upgrade()
-                    .is_some_and(|queued| Arc::ptr_eq(&queued, notified))
-            }) && !waiter.waker.will_wake(cx.waker())
-            {
-                waiter.waker = cx.waker().clone();
+        if let Some(waiter) = state
+            .waiters
+            .iter_mut()
+            .find(|waiter| waiter.notified.ptr_eq(&Arc::downgrade(&future.notified)))
+        {
+            if let Some(waker) = waker {
+                waiter.waker.clone_from(waker);
             }
         } else {
             state.waiters.push_back(Waiter {
-                notified: Arc::downgrade(notified),
-                waker: cx.waker().clone(),
+                notified: Arc::downgrade(&future.notified),
+                waker: waker.unwrap_or(Waker::noop()).clone(),
             });
-            *registered = true;
         }
+        Poll::Pending
+    }
 
-        if notified.load(Ordering::Acquire) {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
+    fn cancel(&self, future: &FutureState) {
+        let waker = {
+            let mut state = self.state.lock().unwrap();
+            remove_waiter(&mut state, &future.notified);
+            // A selected notify_one permit belongs to the queue until consumed.
+            if future.notified.load(Ordering::Acquire) == ONE {
+                notify_locked(&mut state, false)
+            } else {
+                None
+            }
+        };
+        if let Some(waker) = waker {
+            waker.wake();
         }
     }
+}
+
+fn remove_waiter(state: &mut NotifyState, notified: &Arc<AtomicU8>) {
+    let weak = Arc::downgrade(notified);
+    state
+        .waiters
+        .retain(|waiter| !waiter.notified.ptr_eq(&weak));
+}
+
+fn notify_locked(state: &mut NotifyState, last: bool) -> Option<Waker> {
+    while let Some(waiter) = if last {
+        state.waiters.pop_back()
+    } else {
+        state.waiters.pop_front()
+    } {
+        if let Some(notified) = waiter.notified.upgrade() {
+            notified.store(ONE, Ordering::Release);
+            return Some(waiter.waker);
+        }
+    }
+    state.permit = true;
+    None
 }
 
 impl Default for Notify {
@@ -144,74 +168,72 @@ impl Default for Notify {
     }
 }
 
+struct FutureState {
+    notified: Arc<AtomicU8>,
+    generation: u64,
+}
+
+impl FutureState {
+    fn new(notify: &Notify) -> Self {
+        Self {
+            notified: Arc::new(AtomicU8::new(WAITING)),
+            generation: notify.state.lock().unwrap().generation,
+        }
+    }
+}
+
 #[must_use = "futures do nothing unless polled"]
 pub struct Notified<'a> {
     notify: &'a Notify,
-    notified: Arc<AtomicBool>,
-    registered: bool,
+    state: FutureState,
 }
 
 impl Future for Notified<'_> {
     type Output = ();
-
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = &mut *self;
-        this.notify
-            .poll_notified(&this.notified, &mut this.registered, cx)
+        this.notify.poll_notified(&mut this.state, Some(cx.waker()))
     }
 }
 
 impl Notified<'_> {
-    /// Registers this future before it is polled, preventing lost notifications in `select!` loops.
     pub fn enable(mut self: Pin<&mut Self>) -> bool {
         let this = &mut *self;
-        enable_notified(this.notify, &this.notified, &mut this.registered)
+        this.notify.poll_notified(&mut this.state, None).is_ready()
+    }
+}
+
+impl Drop for Notified<'_> {
+    fn drop(&mut self) {
+        self.notify.cancel(&self.state);
     }
 }
 
 #[must_use = "futures do nothing unless polled"]
 pub struct OwnedNotified {
     notify: Arc<Notify>,
-    notified: Arc<AtomicBool>,
-    registered: bool,
+    state: FutureState,
 }
 
 impl Future for OwnedNotified {
     type Output = ();
-
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = &mut *self;
-        this.notify
-            .poll_notified(&this.notified, &mut this.registered, cx)
+        this.notify.poll_notified(&mut this.state, Some(cx.waker()))
     }
 }
 
 impl OwnedNotified {
-    /// Registers this future before it is polled.
     pub fn enable(mut self: Pin<&mut Self>) -> bool {
         let this = &mut *self;
-        enable_notified(&this.notify, &this.notified, &mut this.registered)
+        this.notify.poll_notified(&mut this.state, None).is_ready()
     }
 }
 
-fn enable_notified(notify: &Notify, notified: &Arc<AtomicBool>, registered: &mut bool) -> bool {
-    if notified.load(Ordering::Acquire) {
-        return true;
+impl Drop for OwnedNotified {
+    fn drop(&mut self) {
+        self.notify.cancel(&self.state);
     }
-    let mut state = notify.state.lock().unwrap();
-    if state.permit {
-        state.permit = false;
-        notified.store(true, Ordering::Release);
-        return true;
-    }
-    if !*registered {
-        state.waiters.push_back(Waiter {
-            notified: Arc::downgrade(notified),
-            waker: Waker::noop().clone(),
-        });
-        *registered = true;
-    }
-    false
 }
 
 #[cfg(test)]
