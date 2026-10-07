@@ -97,6 +97,36 @@ runs the same script. Linux testing supplements the OHOS compatibility contract.
 `FFRT_TEST_SOURCE` and `FFRT_TEST_SECUREC` can point to existing source checkouts
 for offline runs; `FFRT_TEST_CACHE` selects the build cache directory.
 
+The [OHOS QEMU workflow](.github/workflows/ohos-qemu.yml) runs on Ubuntu 24.04
+with x86_64 KVM, OpenHarmony 7.0 / API 26, and the SHA-256-verified
+`harmony-contrib/ohos-qemu` release `v20260919`. It uploads native Rust binaries
+with HDC and executes them directly in the guest. Each of three rounds runs:
+
+- All-feature unit and integration tests.
+- Integration tests with default features disabled.
+- The `qemu_smoke` and `tokio` package-alias examples.
+
+Macro tests run on the host. CI retains the guest configuration, boot logs,
+Cargo logs, and each binary's SHA-256, arguments, output, and remote exit status
+as an artifact. A missing remote status or a timeout fails the job; cleanup
+stops the guest and its isolated HDC server even after a test failure.
+
+To run the same workflow locally on Apple Silicon with QEMU installed and the
+`aarch64-unknown-linux-ohos` Rust target available:
+
+```bash
+python3 scripts/qemu/boot.py --output target/qemu/guest --arch arm64 --accel hvf \
+  --hdc /path/to/toolchains/hdc
+python3 scripts/qemu/run.py --guest target/qemu/guest/guest.json \
+  --ndk /path/to/native --output target/qemu/results --repeat 3
+python3 scripts/qemu/stop.py --guest target/qemu/guest/guest.json
+```
+
+On Linux x86_64, use `--arch x86_64 --accel kvm` and install the
+`x86_64-unknown-linux-ohos` Rust target. Boot requires access to `/dev/kvm`.
+Use a new output directory for each invocation. `boot.py --archive /path/to/image.tar.gz`
+reuses a local copy of the pinned release and still verifies its checksum.
+
 To execute tests on an already connected arm64 OpenHarmony device or QEMU guest:
 
 ```bash
