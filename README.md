@@ -25,7 +25,7 @@ cargo add ffrt
 # raw sys bindings
 cargo add ffrt-sys
 # or the napi extension
-cargo add ohos-ext
+cargo add napi-ffrt-ext
 ```
 
 ## Basic Usage
@@ -48,12 +48,12 @@ pub fn run_ffrt() -> () {
 
 ## Napi-Ext
 
-We can also define async function for napi with `ohos-ext`.
+We can also define async function for napi with `napi-ffrt-ext`.
 
 ### Execute with env
 
 ```rs
-use ohos_ext::*;
+use napi_ffrt_ext::*;
 
 #[napi(ts_return_type = "Promise<void>")]
 pub fn example_a<'env>(
@@ -74,7 +74,7 @@ pub fn example_a<'env>(
 ### ffrt macro
 
 ```rs
-use ohos_ext::*;
+use napi_ffrt_ext::*;
 
 #[ffrt]
 pub async fn example_e() -> napi_ohos::Result<String> {

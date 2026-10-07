@@ -80,7 +80,7 @@ def main():
 
     try:
         # Procedural macro tests execute on the host; target tests execute via HDC.
-        run('macros', ['test', '--locked', '-p', 'ffrt-macros', '-p', 'ohos-ext-macro'])
+        run('macros', ['test', '--locked', '-p', 'ffrt-macros', '-p', 'napi-ffrt-ext-macro'])
         for index in range(1, args.repeat + 1):
             env['FFRT_EVIDENCE_DIR'] = str(output / f'run-{index}' / 'binaries')
             run(f'run-{index}-full', ['test', '--locked', '-p', 'ffrt', '--all-features',

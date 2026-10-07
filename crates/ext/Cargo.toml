@@ -1,12 +1,12 @@
 [package]
-name = "ohos-ext"
+name = "napi-ffrt-ext"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 license = "MIT"
 description = "FFRT napi extension for ohos-rs"
 
 [dependencies]
-ohos-ext-macro = { workspace = true }
+napi-ffrt-ext-macro = { workspace = true }
 ffrt = { workspace = true }
 ffrt-sys = { workspace = true }
 napi-ohos = { workspace = true }

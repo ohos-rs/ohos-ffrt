@@ -5,8 +5,8 @@ resolver = "2"
 [workspace.dependencies]
 ffrt-sys = { path = "crates/sys", version = "0.1.0" }
 ffrt = { path = "crates/ffrt", version = "0.1.0" }
-ohos-ext = { path = "crates/ext", version = "0.1.0" }
-ohos-ext-macro = { path = "crates/macro", version = "0.1.0" }
+napi-ffrt-ext = { path = "crates/ext", version = "0.1.0" }
+napi-ffrt-ext-macro = { path = "crates/macro", version = "0.1.0" }
 ffrt-macros = { path = "crates/ffrt-macros", version = "0.1.0" }
 
 futures = "0.3"

@@ -13,7 +13,7 @@ pub use attr::*;
 #[cfg(feature = "tracing")]
 pub use builder::Builder;
 pub use join_set::{JoinNext, JoinNextWithId, JoinSet};
-pub use local_set::{LocalEnterGuard, LocalSet, RunUntil, spawn_local};
+pub use local_set::{spawn_local, LocalEnterGuard, LocalSet, RunUntil};
 pub use priority::*;
 pub use qos::*;
 pub use task::*;
@@ -26,14 +26,14 @@ pub mod futures {
     pub use super::task_local::TaskLocalFuture;
 }
 
-#[deprecated = "Moved to task::coop::Unconstrained"]
-pub use coop::Unconstrained;
 #[deprecated = "Moved to task::coop::consume_budget"]
 pub use coop::consume_budget;
 #[deprecated = "Moved to task::coop::unconstrained"]
 pub use coop::unconstrained;
+#[deprecated = "Moved to task::coop::Unconstrained"]
+pub use coop::Unconstrained;
 
 pub use crate::runtime::{
-    AbortHandle, Id, JoinError, JoinFuture, JoinHandle, block_in_place, id, spawn, spawn_blocking,
-    spawn_with_attr, try_id, yield_now,
+    block_in_place, id, spawn, spawn_blocking, spawn_with_attr, try_id, yield_now, AbortHandle, Id,
+    JoinError, JoinFuture, JoinHandle,
 };

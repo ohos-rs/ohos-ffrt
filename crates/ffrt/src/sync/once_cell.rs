@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::fmt;
-use std::future::{Future, poll_fn};
+use std::future::{poll_fn, Future};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Poll, Waker};
 

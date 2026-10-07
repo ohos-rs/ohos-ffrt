@@ -2,15 +2,15 @@
 // the user-visible initializer is already const.
 #![allow(clippy::missing_const_for_thread_local)]
 
-use super::WakerState;
 use super::trace::TaskTrace;
+use super::WakerState;
 use crate::signal::oneshot;
-use crate::{JoinError, create_waker};
+use crate::{create_waker, JoinError};
 use crate::{Task, TaskAttr};
 use ffrt_sys::ffrt_wait;
 use std::cell::Cell;
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, Location, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe, Location};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

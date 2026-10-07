@@ -8,7 +8,7 @@ use std::mem::MaybeUninit;
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::task::{Context, Poll, Waker, ready};
+use std::task::{ready, Context, Poll, Waker};
 
 use bytes::{Buf, BufMut};
 
@@ -1966,23 +1966,21 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     let mut amount = 0u64;
-    std::future::poll_fn(|cx| {
-        loop {
-            let available = ready!(Pin::new(&mut *reader).poll_fill_buf(cx))?;
-            if available.is_empty() {
-                ready!(Pin::new(&mut *writer).poll_flush(cx))?;
-                return Poll::Ready(Ok(amount));
-            }
-            let written = ready!(Pin::new(&mut *writer).poll_write(cx, available))?;
-            if written == 0 {
-                return Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "failed to copy buffered stream",
-                )));
-            }
-            Pin::new(&mut *reader).consume(written);
-            amount += written as u64;
+    std::future::poll_fn(|cx| loop {
+        let available = ready!(Pin::new(&mut *reader).poll_fill_buf(cx))?;
+        if available.is_empty() {
+            ready!(Pin::new(&mut *writer).poll_flush(cx))?;
+            return Poll::Ready(Ok(amount));
         }
+        let written = ready!(Pin::new(&mut *writer).poll_write(cx, available))?;
+        if written == 0 {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "failed to copy buffered stream",
+            )));
+        }
+        Pin::new(&mut *reader).consume(written);
+        amount += written as u64;
     })
     .await
 }

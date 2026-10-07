@@ -68,7 +68,11 @@ impl Looper {
         }
         let ret = unsafe { ffrt_loop_run(self.inner.handle) };
         self.inner.running.store(false, Ordering::Release);
-        if ret == 0 { Ok(()) } else { Err(ret) }
+        if ret == 0 {
+            Ok(())
+        } else {
+            Err(ret)
+        }
     }
 
     /// Stops a running loop.
@@ -92,7 +96,11 @@ impl Looper {
         cb: ffrt_poller_cb,
     ) -> Result<(), c_int> {
         let ret = unsafe { ffrt_loop_epoll_ctl(self.inner.handle, op, fd, events, data, cb) };
-        if ret == 0 { Ok(()) } else { Err(ret) }
+        if ret == 0 {
+            Ok(())
+        } else {
+            Err(ret)
+        }
     }
 
     /// Tries to start a timer on the loop.

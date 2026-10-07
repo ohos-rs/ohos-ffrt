@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::visit_mut::VisitMut;
-use syn::{Expr, Pat, Result, Token, parenthesized};
+use syn::{parenthesized, Expr, Pat, Result, Token};
 
 struct Branch {
     pattern: Pat,

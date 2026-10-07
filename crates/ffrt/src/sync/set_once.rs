@@ -1,8 +1,8 @@
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::mem::{ManuallyDrop, MaybeUninit};
-use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Mutex as StdMutex;
 use std::task::{Poll, Waker};
 
 /// A thread-safe cell that can be written once and awaited asynchronously.

@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Ident, ItemFn, LitInt, LitStr, ReturnType, Token, Type, parse::Parse, parse::ParseStream,
-    parse_quote,
+    parse::Parse, parse::ParseStream, parse_quote, Ident, ItemFn, LitInt, LitStr, ReturnType,
+    Token, Type,
 };
 
 #[derive(Default)]
@@ -121,16 +121,21 @@ fn convert(
     }
 
     // Check for incorrect Result usage
-    if let ReturnType::Type(_, ty) = func_output
-        && let Type::Path(type_path) = &**ty
-        && let Some(segment) = type_path.path.segments.last()
-        && segment.ident == "Result"
-        && !is_napi_ohos_path(&type_path.path)
-    {
-        return Err(syn::Error::new_spanned(
-            ty,
-            "ffrt macro requires napi_ohos::Result, not std::result::Result or other Result types",
-        ));
+    if let ReturnType::Type(_, ty) = func_output {
+        if let Type::Path(type_path) = &**ty {
+            if type_path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "Result")
+                && !is_napi_ohos_path(&type_path.path)
+            {
+                return Err(syn::Error::new_spanned(
+                    ty,
+                    "ffrt macro requires napi_ohos::Result, not std::result::Result or other Result types",
+                ));
+            }
+        }
     }
 
     // Determine the inner return type (what the async function returns)
@@ -181,7 +186,7 @@ fn convert(
     let spawn_call = if macro_args.has_any_attr() {
         quote! {
             let attr = {
-                use ohos_ext::{TaskAttr, Qos, TaskPriority};
+                use napi_ffrt_ext::{TaskAttr, Qos, TaskPriority};
                 #attr_setup
             };
             env.spawn_local_with_attr(attr, async move #async_body)
@@ -200,7 +205,7 @@ fn convert(
             env: &'env napi_ohos::Env,
             #func_inputs
         ) -> napi_ohos::Result<napi_ohos::bindgen_prelude::PromiseRaw<'env, #inner_return_type>> {
-            use ohos_ext::SpawnLocalExt;
+            use napi_ffrt_ext::SpawnLocalExt;
 
             #spawn_call
         }
@@ -296,13 +301,15 @@ impl MacroArgs {
 }
 
 fn is_result_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.last()
-        && segment.ident == "Result"
-    {
-        return is_napi_ohos_path(&type_path.path);
-    }
-    false
+    let Type::Path(type_path) = ty else {
+        return false;
+    };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "Result")
+        && is_napi_ohos_path(&type_path.path)
 }
 
 fn is_napi_ohos_path(path: &syn::Path) -> bool {
@@ -323,14 +330,18 @@ fn is_napi_ohos_path(path: &syn::Path) -> bool {
 }
 
 fn extract_result_inner_type(ty: &Type) -> Option<Type> {
-    if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.last()
-        && segment.ident == "Result"
-        && is_napi_ohos_path(&type_path.path)
-        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
-    {
-        return Some(inner_ty.clone());
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != "Result" || !is_napi_ohos_path(&type_path.path) {
+        return None;
     }
-    None
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    match args.args.first() {
+        Some(syn::GenericArgument::Type(inner_ty)) => Some(inner_ty.clone()),
+        _ => None,
+    }
 }

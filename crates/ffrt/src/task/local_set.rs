@@ -5,10 +5,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, Location, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe, Location};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
 use crate::lock::Mutex;

@@ -193,8 +193,8 @@ version = "0.1.0"
 dependencies = [
  "napi-build-ohos",
  "napi-derive-ohos",
+ "napi-ffrt-ext",
  "napi-ohos",
- "ohos-ext",
  "ohos-hilog-binding",
 ]
 
@@ -276,6 +276,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "napi-ffrt-ext"
+version = "0.1.0"
+dependencies = [
+ "ffrt",
+ "ffrt-sys",
+ "futures",
+ "napi-ffrt-ext-macro",
+ "napi-ohos",
+]
+
+[[package]]
+name = "napi-ffrt-ext-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
+
+[[package]]
 name = "napi-ohos"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -312,26 +332,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys",
-]
-
-[[package]]
-name = "ohos-ext"
-version = "0.1.0"
-dependencies = [
- "ffrt",
- "ffrt-sys",
- "futures",
- "napi-ohos",
- "ohos-ext-macro",
-]
-
-[[package]]
-name = "ohos-ext-macro"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.108",
 ]
 
 [[package]]

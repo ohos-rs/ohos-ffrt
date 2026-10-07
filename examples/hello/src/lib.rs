@@ -2,11 +2,11 @@ use std::time::Duration;
 use std::time::Instant;
 
 use napi_derive_ohos::napi;
+use napi_ffrt_ext::*;
 use napi_ohos::bindgen_prelude::FnArgs;
 use napi_ohos::bindgen_prelude::Function;
 use napi_ohos::bindgen_prelude::PromiseRaw;
 use napi_ohos::*;
-use ohos_ext::*;
 
 #[napi(ts_return_type = "Promise<void>")]
 pub fn example_a<'env>(
@@ -65,7 +65,7 @@ pub async fn example_h() {
 #[ffrt]
 pub async fn sleep_example() {
     ohos_hilog_binding::hilog_info!(format!("Start time: {:?}", Instant::now()));
-    ohos_ext::timer::r#async::sleep(Duration::from_secs(1)).await;
+    napi_ffrt_ext::timer::r#async::sleep(Duration::from_secs(1)).await;
     ohos_hilog_binding::hilog_info!(format!("End time: {:?}", Instant::now()));
 }
 

@@ -3,13 +3,13 @@
 use std::convert::identity;
 
 use napi_ohos::{
-    Error, Result, Status,
-    bindgen_prelude::{FromNapiValue, JsValuesTupleIntoVec, check_status},
+    bindgen_prelude::{check_status, FromNapiValue, JsValuesTupleIntoVec},
     sys,
     threadsafe_function::{
         ThreadsafeFunction, ThreadsafeFunctionCallJsBackData, ThreadsafeFunctionCallMode,
         ThreadsafeFunctionCallVariant,
     },
+    Error, Result, Status,
 };
 
 pub trait ThreadsafeFunctionCalleeHandleExt {
@@ -22,7 +22,7 @@ pub trait ThreadsafeFunctionCalleeHandleExt {
     const MAX_QUEUE_SIZE: usize;
 
     fn call_local(&self, value: Self::T)
-    -> impl std::future::Future<Output = Result<Self::Return>>;
+        -> impl std::future::Future<Output = Result<Self::Return>>;
 }
 
 pub trait ThreadsafeFunctionCalleeUnHandleExt {
@@ -41,13 +41,13 @@ pub trait ThreadsafeFunctionCalleeUnHandleExt {
 }
 
 impl<
-    T: 'static,
-    Return: 'static + FromNapiValue,
-    CallJsBackArgs: 'static + JsValuesTupleIntoVec,
-    ErrorStatus: AsRef<str> + From<Status>,
-    const Weak: bool,
-    const MaxQueueSize: usize,
-> ThreadsafeFunctionCalleeHandleExt
+        T: 'static,
+        Return: 'static + FromNapiValue,
+        CallJsBackArgs: 'static + JsValuesTupleIntoVec,
+        ErrorStatus: AsRef<str> + From<Status>,
+        const Weak: bool,
+        const MaxQueueSize: usize,
+    > ThreadsafeFunctionCalleeHandleExt
     for ThreadsafeFunction<
         T,
         Return,
@@ -108,13 +108,13 @@ impl<
 }
 
 impl<
-    T: 'static,
-    Return: 'static + FromNapiValue,
-    CallJsBackArgs: 'static + JsValuesTupleIntoVec,
-    ErrorStatus: AsRef<str> + From<Status>,
-    const Weak: bool,
-    const MaxQueueSize: usize,
-> ThreadsafeFunctionCalleeUnHandleExt
+        T: 'static,
+        Return: 'static + FromNapiValue,
+        CallJsBackArgs: 'static + JsValuesTupleIntoVec,
+        ErrorStatus: AsRef<str> + From<Status>,
+        const Weak: bool,
+        const MaxQueueSize: usize,
+    > ThreadsafeFunctionCalleeUnHandleExt
     for ThreadsafeFunction<T, Return, CallJsBackArgs, ErrorStatus, true, { Weak }, { MaxQueueSize }>
 {
     type T = T;
